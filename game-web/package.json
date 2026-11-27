@@ -1,0 +1,25 @@
+{
+  "name": "manmarubuu-toybox-action",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --port 5173",
+    "verify": "node scripts/verify_playthrough.mjs"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.14.0",
+    "n8ao": "^2.1.0",
+    "postprocessing": "^6.36.7",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.174.0",
+    "playwright-core": "^1.65.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0"
+  }
+}

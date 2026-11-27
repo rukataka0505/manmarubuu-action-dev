@@ -1,0 +1,51 @@
+# === Dependencies & Build Outputs ===
+node_modules/
+game-web/node_modules/
+game-web/dist/
+*.tsbuildinfo
+
+# === Environment & Secrets ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# === Heavy 3D / Media / Intermediate Workspaces (keep repo well under Gemini Web 100MB / 5,000 files limit) ===
+_discarded/
+model/
+model-astra/
+model-astra-max/
+model-opus/
+*minecraft_blueprint*
+
+# === Heavy Game Assets & QA Artifacts ===
+game-web/public/audio/
+game-web/public/hdri/
+game-web/public/icons/
+game-web/public/images/
+game-web/public/models/
+game-web/public/textures/
+game-web/public/ogp.jpg
+game-web/qa-shots/
+game-web/ai-pipeline/
+
+# === Blender Binaries, Renders, Logs & Temp Outputs (keep .py / .md scripts) ===
+game-web/blender/_tmp_*/
+game-web/blender/renders/
+game-web/blender/__pycache__/
+game-web/blender/*.blend
+game-web/blender/*.blend1
+game-web/blender/*.glb
+game-web/blender/*.png
+game-web/blender/*.jpg
+game-web/blender/*.log
+game-web/blender/*.json
+game-web/blender/*.txt
+
+# === OS / Editor / Python Noise ===
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+*.log

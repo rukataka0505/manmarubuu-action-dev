@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#f6799b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="まんまるぶう" />
+    <title>まんまるぶう：おもちゃばこ大暴走！</title>
+    <meta
+      name="description"
+      content="もふもふの「まんまるぶう」と一緒に3Dおもちゃ箱ワールドを大冒険！2段ジャンプやヒップドロップ、無敵のFEVER x8で大暴走する、ブラウザですぐ遊べる3Dアクションゲーム！"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="まんまるぶう：おもちゃばこ大暴走！" />
+    <meta property="og:locale" content="ja_JP" />
+    <meta property="og:title" content="まんまるぶう：おもちゃばこ大暴走！" />
+    <meta
+      property="og:description"
+      content="もふもふの「まんまるぶう」と一緒に3Dおもちゃ箱ワールドを大冒険！2段ジャンプやヒップドロップ、無敵のFEVER x8で大暴走する、ブラウザですぐ遊べる3Dアクションゲーム！"
+    />
+    <meta property="og:image" content="./ogp.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="まんまるぶう：おもちゃばこ大暴走！ — 3Dおもちゃ箱ワールドで遊ぶまんまるぶうのタイトルビジュアル"
+    />
+    <meta property="og:url" content="./" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="まんまるぶう：おもちゃばこ大暴走！" />
+    <meta
+      name="twitter:description"
+      content="もふもふの「まんまるぶう」と一緒に3Dおもちゃ箱ワールドを大冒険！2段ジャンプやヒップドロップ、無敵のFEVER x8で大暴走する、ブラウザですぐ遊べる3Dアクションゲーム！"
+    />
+    <meta name="twitter:image" content="./ogp.jpg" />
+    <meta
+      name="twitter:image:alt"
+      content="まんまるぶう：おもちゃばこ大暴走！ — 3Dおもちゃ箱ワールドで遊ぶまんまるぶうのタイトルビジュアル"
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+    <link rel="preload" as="image" href="./images/face-wipe/happy.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=M+PLUS+Rounded+1c:wght@500;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #fff4df;
+        font-family: 'M PLUS Rounded 1c', 'Fredoka', 'Hiragino Maru Gothic ProN', 'Yu Gothic UI', sans-serif;
+      }
+      .boot-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background:
+          radial-gradient(circle at 50% 34%, rgba(255, 255, 255, 0.92) 0%, rgba(255, 245, 224, 0.72) 48%, rgba(255, 214, 228, 0.94) 100%),
+          linear-gradient(160deg, #fff8eb 0%, #ffe6cc 52%, #ffd4e3 100%);
+        color: #4d2c1b;
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 0.45s ease, transform 0.45s ease;
+      }
+      .boot-loader.is-done {
+        opacity: 0;
+        transform: scale(1.03);
+        pointer-events: none;
+      }
+      .boot-loader-card {
+        position: relative;
+        width: min(440px, 92vw);
+        padding: 22px 24px 20px;
+        border-radius: 28px;
+        border: 4px solid #ffffff;
+        background: linear-gradient(180deg, rgba(255, 252, 244, 0.96) 0%, rgba(255, 238, 206, 0.95) 100%);
+        box-shadow:
+          0 0 0 4px #f3c17a,
+          0 10px 0 #c98642,
+          0 20px 38px rgba(92, 46, 20, 0.24);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .boot-loader-buu-wrap {
+        position: relative;
+        width: 122px;
+        height: 122px;
+        display: grid;
+        place-items: center;
+      }
+      .boot-loader-halo {
+        position: absolute;
+        inset: 4px;
+        border-radius: 50%;
+        background: radial-gradient(circle, #fffdf4 0%, #ffe8a8 65%, rgba(255, 232, 168, 0) 100%);
+        border: 3px dashed rgba(227, 164, 90, 0.65);
+        animation: bootHaloSpin 12s linear infinite;
+      }
+      .boot-loader-buu {
+        position: relative;
+        width: 112px;
+        height: 112px;
+        object-fit: contain;
+        filter: drop-shadow(0 8px 10px rgba(105, 52, 22, 0.22));
+        animation: bootBuuHop 1.3s ease-in-out infinite;
+      }
+      .boot-loader-title {
+        font-size: clamp(16px, 2.8vw, 20px);
+        font-weight: 900;
+        color: #d94c74;
+        letter-spacing: 0.03em;
+        text-shadow: 0 2px 0 #ffffff;
+      }
+      .boot-loader-status {
+        font-size: 14px;
+        font-weight: 800;
+        color: #5f3620;
+      }
+      .boot-loader-bar-row {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .boot-loader-track {
+        position: relative;
+        flex: 1;
+        height: 18px;
+        padding: 3px;
+        border-radius: 999px;
+        background: #ead1ab;
+        border: 2.5px solid #ffffff;
+        box-shadow: inset 0 2px 4px rgba(90, 48, 22, 0.22);
+        overflow: hidden;
+      }
+      .boot-loader-fill {
+        height: 100%;
+        width: 8%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #ff7fa6 0%, #ffc44d 50%, #72d9ff 100%);
+        box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.65);
+        transition: width 0.26s ease-out;
+      }
+      .boot-loader-pct {
+        min-width: 42px;
+        text-align: right;
+        font-size: 13px;
+        font-weight: 900;
+        color: #8c4b23;
+        font-variant-numeric: tabular-nums;
+      }
+      .boot-loader.is-ready {
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      .boot-loader.is-ready .boot-loader-card {
+        transition: transform 0.14s ease;
+      }
+      .boot-loader.is-ready.is-pressing .boot-loader-card {
+        transform: scale(0.97);
+      }
+      .boot-loader.is-ready .boot-loader-bar-row {
+        display: none;
+      }
+      .boot-loader-tap {
+        display: none;
+      }
+      .boot-loader.is-ready .boot-loader-tap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        margin-top: 4px;
+        padding: 10px 18px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 232, 240, 0.92) 100%);
+        border: 2.5px solid #f6799b;
+        box-shadow: 0 4px 0 rgba(217, 76, 116, 0.25);
+        animation: bootTapPulse 1.5s ease-in-out infinite;
+      }
+      .boot-loader-tap-text {
+        font-size: clamp(15px, 4vw, 18px);
+        font-weight: 900;
+        color: #d94c74;
+        letter-spacing: 0.04em;
+        text-shadow: 0 1.5px 0 #ffffff;
+        white-space: nowrap;
+      }
+      .boot-loader-tap-sub {
+        font-size: 12px;
+        font-weight: 800;
+        color: #7a4626;
+      }
+      .boot-loader-detail {
+        display: none;
+        font-size: 12px;
+        line-height: 1.5;
+        font-weight: 700;
+        color: #7a4626;
+        background: rgba(255, 255, 255, 0.72);
+        border: 1.5px solid rgba(227, 164, 90, 0.55);
+        border-radius: 14px;
+        padding: 8px 12px;
+        max-width: 100%;
+        word-break: break-word;
+      }
+      .boot-loader-detail[hidden],
+      .boot-loader-actions[hidden] {
+        display: none !important;
+      }
+      .boot-loader.is-error .boot-loader-detail,
+      .boot-loader.is-stalled .boot-loader-detail {
+        display: block;
+      }
+      .boot-loader.is-error .boot-loader-status {
+        color: #b8224c;
+      }
+      .boot-loader.is-error .boot-loader-buu {
+        animation: none;
+      }
+      .boot-loader.is-error .boot-loader-bar-row {
+        display: none;
+      }
+      .boot-loader-actions {
+        display: none;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 4px;
+        width: 100%;
+      }
+      .boot-loader.is-error .boot-loader-actions,
+      .boot-loader.is-stalled .boot-loader-actions {
+        display: flex;
+      }
+      .boot-loader.is-ready .boot-loader-detail,
+      .boot-loader.is-ready .boot-loader-actions,
+      .boot-loader.is-done .boot-loader-detail,
+      .boot-loader.is-done .boot-loader-actions {
+        display: none !important;
+      }
+      .boot-loader-retry-btn,
+      .boot-loader-reset-btn {
+        appearance: none;
+        border-radius: 999px;
+        font-family: inherit;
+        font-weight: 900;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .boot-loader-retry-btn {
+        border: 3px solid #ffffff;
+        padding: 10px 20px;
+        font-size: 14px;
+        color: #ffffff;
+        background: linear-gradient(180deg, #ff8ab0 0%, #e84b7a 100%);
+        box-shadow: 0 4px 0 #b02e56, 0 8px 16px rgba(176, 46, 86, 0.25);
+      }
+      .boot-loader-retry-btn:active {
+        transform: translateY(2px);
+        box-shadow: 0 2px 0 #b02e56;
+      }
+      .boot-loader-reset-btn {
+        border: 2px solid #e3a45a;
+        padding: 9px 14px;
+        font-size: 12px;
+        color: #6b3d24;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 3px 0 rgba(201, 134, 66, 0.35);
+      }
+      .boot-loader-reset-btn:active {
+        transform: translateY(2px);
+        box-shadow: 0 1px 0 rgba(201, 134, 66, 0.35);
+      }
+      @keyframes bootTapPulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1.02);
+        }
+        50% {
+          opacity: 0.52;
+          transform: scale(0.98);
+        }
+      }
+      @keyframes bootBuuHop {
+        0%,
+        100% {
+          transform: translateY(2px) scale(1.03, 0.96);
+        }
+        50% {
+          transform: translateY(-7px) scale(0.97, 1.04);
+        }
+      }
+      @keyframes bootHaloSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (max-height: 500px) {
+        .boot-loader-card {
+          width: min(420px, 88vw);
+          padding: 14px 20px 14px;
+          gap: 6px;
+        }
+        .boot-loader-buu-wrap {
+          width: 86px;
+          height: 86px;
+        }
+        .boot-loader-buu {
+          width: 80px;
+          height: 80px;
+        }
+        .boot-loader-title {
+          font-size: 16px;
+        }
+        .boot-loader-status {
+          font-size: 13px;
+        }
+        .boot-loader.is-ready .boot-loader-tap {
+          padding: 7px 16px;
+          margin-top: 2px;
+          gap: 2px;
+        }
+        .boot-loader-tap-text {
+          font-size: 15px;
+        }
+        .boot-loader-tap-sub {
+          font-size: 11px;
+        }
+        .boot-loader-detail {
+          font-size: 11px;
+          padding: 6px 10px;
+        }
+        .boot-loader-retry-btn {
+          padding: 8px 16px;
+          font-size: 13px;
+        }
+        .boot-loader-reset-btn {
+          padding: 7px 12px;
+          font-size: 11px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-loader.is-ready .boot-loader-tap {
+          animation: none;
+        }
+      }
+    </style>
+    <script>
+      (function () {
+        var START_TIMEOUT_MS = 10000;
+        var STALL_TIMEOUT_MS = 25000;
+        var state = 'loading';
+        var started = false;
+        var startTimer = null;
+        var stallTimer = null;
+        var pendingError = null;
+        var pendingStall = false;
+
+        function clearTimers() {
+          if (startTimer !== null) {
+            clearTimeout(startTimer);
+            startTimer = null;
+          }
+          if (stallTimer !== null) {
+            clearTimeout(stallTimer);
+            stallTimer = null;
+          }
+        }
+
+        function setHidden(el, hidden) {
+          if (!el) return;
+          if (hidden) {
+            el.setAttribute('hidden', '');
+          } else {
+            el.removeAttribute('hidden');
+          }
+        }
+
+        function applyPendingDomState() {
+          var loader = document.getElementById('boot-loader');
+          if (!loader) return;
+          var statusEl = document.getElementById('boot-loader-status');
+          var detailEl = document.getElementById('boot-loader-detail');
+          var actionsEl = document.getElementById('boot-loader-actions');
+
+          if (pendingError) {
+            loader.classList.remove('is-stalled');
+            loader.classList.add('is-error');
+            loader.dataset.state = 'error';
+            if (statusEl) statusEl.textContent = pendingError.message;
+            if (detailEl) {
+              if (pendingError.detail) {
+                detailEl.textContent = pendingError.detail;
+                setHidden(detailEl, false);
+              } else {
+                detailEl.textContent = '';
+                setHidden(detailEl, true);
+              }
+            }
+            setHidden(actionsEl, false);
+            return;
+          }
+
+          if (pendingStall && state === 'loading') {
+            loader.classList.add('is-stalled');
+            if (detailEl) {
+              detailEl.textContent =
+                '読み込みに時間がかかっています。止まっている場合は下のボタンで再読み込みしてね。';
+              setHidden(detailEl, false);
+            }
+            setHidden(actionsEl, false);
+            return;
+          }
+
+          loader.classList.remove('is-stalled', 'is-error');
+          if (detailEl) {
+            detailEl.textContent = '';
+            setHidden(detailEl, true);
+          }
+          setHidden(actionsEl, true);
+        }
+
+        function scheduleStartWatchdog() {
+          if (startTimer !== null) {
+            clearTimeout(startTimer);
+            startTimer = null;
+          }
+          if (state !== 'loading' || started || document.visibilityState === 'hidden') return;
+          startTimer = window.setTimeout(function () {
+            startTimer = null;
+            if (state === 'loading' && !started && document.visibilityState !== 'hidden') {
+              guard.showError(
+                'ゲーム本体の起動に失敗、または時間がかかっています。',
+                'サーバーの起動状態や通信を確認して再読み込みしてね。'
+              );
+            }
+          }, START_TIMEOUT_MS);
+        }
+
+        function scheduleStallWatchdog() {
+          if (stallTimer !== null) {
+            clearTimeout(stallTimer);
+            stallTimer = null;
+          }
+          if (state !== 'loading' || !started || document.visibilityState === 'hidden') return;
+          stallTimer = window.setTimeout(function () {
+            stallTimer = null;
+            if (state === 'loading' && started && document.visibilityState !== 'hidden') {
+              pendingStall = true;
+              applyPendingDomState();
+            }
+          }, STALL_TIMEOUT_MS);
+        }
+
+        function detachEarlyListeners() {
+          window.removeEventListener('error', onEarlyError, true);
+          window.removeEventListener('unhandledrejection', onEarlyRejection);
+          document.removeEventListener('visibilitychange', onVisibilityChange);
+        }
+
+        function onEarlyError(event) {
+          if (state !== 'loading') return;
+          var target = event && event.target;
+          if (target && target !== window && target.tagName === 'SCRIPT') {
+            guard.showError(
+              'ゲーム本体の読み込みに失敗しました。',
+              'サーバー停止中・通信エラー、または古いキャッシュの可能性があります。'
+            );
+            return;
+          }
+          if (target === window || (typeof ErrorEvent !== 'undefined' && event instanceof ErrorEvent)) {
+            var msg = event && event.message ? String(event.message) : '予期しないエラーが発生しました。';
+            guard.showError('起動中にエラーが発生しました。', msg);
+          }
+        }
+
+        function onEarlyRejection(event) {
+          if (state !== 'loading') return;
+          var reason = event && event.reason;
+          var msg = '';
+          if (reason && typeof reason === 'object' && 'message' in reason && reason.message) {
+            msg = String(reason.message);
+          } else if (reason !== undefined && reason !== null) {
+            msg = String(reason);
+          }
+          guard.showError('起動中の非同期処理でエラーが発生しました。', msg || '通信や初期化に失敗しました。');
+        }
+
+        function onVisibilityChange() {
+          if (state !== 'loading') return;
+          if (document.visibilityState === 'hidden') {
+            clearTimers();
+          } else {
+            if (!started) {
+              scheduleStartWatchdog();
+            } else {
+              scheduleStallWatchdog();
+            }
+          }
+        }
+
+        var guard = {
+          markStarted: function () {
+            if (state !== 'loading') return;
+            started = true;
+            if (startTimer !== null) {
+              clearTimeout(startTimer);
+              startTimer = null;
+            }
+            pendingStall = false;
+            applyPendingDomState();
+            scheduleStallWatchdog();
+          },
+          markProgress: function () {
+            if (state !== 'loading') return;
+            started = true;
+            if (startTimer !== null) {
+              clearTimeout(startTimer);
+              startTimer = null;
+            }
+            if (pendingStall) {
+              pendingStall = false;
+              applyPendingDomState();
+            }
+            scheduleStallWatchdog();
+          },
+          markReady: function () {
+            if (state === 'ready') return;
+            state = 'ready';
+            pendingError = null;
+            pendingStall = false;
+            clearTimers();
+            detachEarlyListeners();
+            applyPendingDomState();
+          },
+          showError: function (message, detail) {
+            if (state === 'ready') return;
+            state = 'error';
+            pendingStall = false;
+            pendingError = {
+              message: message || 'よみこみに しっぱいしました。',
+              detail: detail || '',
+            };
+            clearTimers();
+            detachEarlyListeners();
+            applyPendingDomState();
+          },
+          getState: function () {
+            return {
+              state: state,
+              started: started,
+              stalled: pendingStall,
+              error: pendingError,
+            };
+          },
+        };
+
+        window.__MANMARUBUU_BOOT_GUARD__ = guard;
+        window.addEventListener('error', onEarlyError, true);
+        window.addEventListener('unhandledrejection', onEarlyRejection);
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        scheduleStartWatchdog();
+
+        function bindRecoveryButtons() {
+          applyPendingDomState();
+          var retryBtn = document.getElementById('boot-loader-retry');
+          var hardRetryBtn = document.getElementById('boot-loader-hard-retry');
+          if (retryBtn) {
+            retryBtn.addEventListener('click', function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              window.location.reload();
+            });
+          }
+          if (hardRetryBtn) {
+            hardRetryBtn.addEventListener('click', function (e) {
+              e.preventDefault();
+              e.stopPropagation();
+              hardRetryBtn.disabled = true;
+              if (retryBtn) retryBtn.disabled = true;
+              var tasks = [];
+              if ('serviceWorker' in navigator && navigator.serviceWorker.getRegistrations) {
+                tasks.push(
+                  navigator.serviceWorker
+                    .getRegistrations()
+                    .then(function (regs) {
+                      return Promise.allSettled(
+                        regs.map(function (reg) {
+                          return reg.unregister();
+                        })
+                      );
+                    })
+                    .catch(function () {})
+                );
+              }
+              if (typeof caches !== 'undefined' && caches.keys) {
+                tasks.push(
+                  caches
+                    .keys()
+                    .then(function (keys) {
+                      return Promise.allSettled(
+                        keys.map(function (key) {
+                          return caches.delete(key);
+                        })
+                      );
+                    })
+                    .catch(function () {})
+                );
+              }
+              Promise.allSettled(tasks).finally(function () {
+                window.location.reload();
+              });
+            });
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', bindRecoveryButtons, { once: true });
+        } else {
+          bindRecoveryButtons();
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas"></canvas>
+      <div id="hud-root"></div>
+    </div>
+    <div id="boot-loader" class="boot-loader" role="status" aria-live="polite">
+      <div class="boot-loader-card">
+        <div class="boot-loader-buu-wrap">
+          <div class="boot-loader-halo" aria-hidden="true"></div>
+          <img
+            class="boot-loader-buu"
+            src="./images/face-wipe/happy.png"
+            alt="まんまるぶう"
+            width="112"
+            height="112"
+          />
+        </div>
+        <div class="boot-loader-title">まんまるぶう：おもちゃばこ大暴走！</div>
+        <div id="boot-loader-status" class="boot-loader-status">おもちゃばこを じゅんびちゅう…</div>
+        <div class="boot-loader-bar-row">
+          <div class="boot-loader-track" aria-hidden="true">
+            <div id="boot-loader-fill" class="boot-loader-fill" style="width: 8%"></div>
+          </div>
+          <span id="boot-loader-pct" class="boot-loader-pct">8%</span>
+        </div>
+        <div id="boot-loader-tap" class="boot-loader-tap" data-role="boot-tap-prompt" aria-hidden="true">
+          <span class="boot-loader-tap-text">♪ 画面をタップしてスタート！ ♪</span>
+          <span class="boot-loader-tap-sub">どこをタップしても はじまるよ</span>
+        </div>
+        <div id="boot-loader-detail" class="boot-loader-detail" hidden></div>
+        <div id="boot-loader-actions" class="boot-loader-actions" hidden>
+          <button id="boot-loader-retry" class="boot-loader-retry-btn" type="button">
+            🔄 ページを再読み込み
+          </button>
+          <button id="boot-loader-hard-retry" class="boot-loader-reset-btn" type="button">
+            🧹 キャッシュを消して再読み込み
+          </button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
