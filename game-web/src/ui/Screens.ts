@@ -7,13 +7,20 @@ import type {
   QualityPreset,
   ResolvedQuality,
   StampId,
+  WorldId,
 } from '../types';
-import { WORLD1_STAMPS, WORLD_CATALOG, createEmptyWorldProgress } from '../core/SaveStore';
+import {
+  WORLD1_STAMPS,
+  WORLD_CATALOG,
+  createEmptyWorldProgress,
+  getWorldStamps,
+} from '../core/SaveStore';
 import { FACE_WIPE_SPRITE_URLS, preloadBuuFaceSprites } from './BuuFaceSprite';
 import { PwaInstallPrompt, type PwaDebugState } from './PwaInstallPrompt';
 
 export interface ScreensHandlers {
   onStartGame: () => void;
+  onSelectWorld: (worldId: WorldId) => void;
   onResetSaveAndNewGame: () => void;
   onOpenWorldSelect: () => void;
   onBackToTitle: () => void;
@@ -261,13 +268,22 @@ export class ScreensManager {
   private titleNewGameBtn: HTMLButtonElement;
   private titlePwaBtn: HTMLButtonElement;
 
-  // World select refs
-  private wsW1MainEl: HTMLSpanElement;
-  private wsW1SecretEl: HTMLSpanElement;
-  private wsW1HighScoreEl: HTMLSpanElement;
-  private wsW1RankEl: HTMLSpanElement;
-  private wsW1StampsEl: HTMLDivElement;
-  private wsW1PlayLabelEl: HTMLSpanElement;
+  // World select refs (per playable world)
+  private wsCardRefs = new Map<
+    WorldId,
+    {
+      cardEl: HTMLDivElement;
+      mainEl: HTMLSpanElement;
+      secretEl: HTMLSpanElement;
+      highScoreEl: HTMLSpanElement;
+      rankEl: HTMLSpanElement;
+      stampsEl: HTMLDivElement;
+      playLabelEl: HTMLSpanElement;
+    }
+  >();
+
+  // Victory header refs
+  private resStampTitleEl: HTMLDivElement;
 
   // Settings refs
   private autoFollowBtns: HTMLButtonElement[];
@@ -374,22 +390,23 @@ export class ScreensManager {
 
     // 2. World Select Screen
     const worldCardsHtml = WORLD_CATALOG.map((w) => {
-      if (w.id === 1) {
+      if (w.playable) {
+        const wid = `w${w.id}`;
         return `
-          <div class="world-card world-card-playable" style="--world-accent:${w.themeColor}">
+          <div class="world-card world-card-playable" data-world-key="${w.worldKey}" style="--world-accent:${w.themeColor}">
             <div class="world-card-head">
               <div class="world-card-sub">${w.subtitle}</div>
               <div class="world-card-title">${w.name}</div>
             </div>
             <p class="world-card-desc">${w.description}</p>
             <div class="world-card-stats">
-              <span class="ws-chip" data-role="ws-w1-main">⭐ 0/${w.mainStars}</span>
-              <span class="ws-chip" data-role="ws-w1-secret">💎 0/${w.secretStars}</span>
-              <span class="ws-chip" data-role="ws-w1-score">🏅 0 pts</span>
-              <span class="ws-chip ws-rank" data-role="ws-w1-rank">RANK -</span>
+              <span class="ws-chip" data-role="ws-${wid}-main">⭐ 0/${w.mainStars}</span>
+              <span class="ws-chip" data-role="ws-${wid}-secret">💎 0/${w.secretStars}</span>
+              <span class="ws-chip" data-role="ws-${wid}-score">🏅 0 pts</span>
+              <span class="ws-chip ws-rank" data-role="ws-${wid}-rank">RANK -</span>
             </div>
-            <div class="ws-mini-stamps" data-role="ws-w1-stamps"></div>
-            <button class="play-btn btn-sm" data-role="select-world-1-btn" type="button"><span class="btn-label" data-role="ws-w1-play-label">▶ このワールドであそぶ！</span></button>
+            <div class="ws-mini-stamps" data-role="ws-${wid}-stamps"></div>
+            <button class="play-btn btn-sm" data-role="select-world-${w.id}-btn" data-select-world="${w.worldKey}" type="button"><span class="btn-label" data-role="ws-${wid}-play-label">▶ このワールドであそぶ！</span></button>
           </div>
         `;
       }
@@ -510,7 +527,7 @@ export class ScreensManager {
           <div class="stat-row"><span class="stat-ico">💗</span><span class="stat-label">うけたダメージ</span><span class="stat-val" data-role="res-dmg">0 回</span></div>
         </div>
         <div class="stamp-section">
-          <div class="stamp-section-title">🏆 ワールド1 スタンプ</div>
+          <div class="stamp-section-title" data-role="res-stamp-title">🏆 ワールド1 スタンプ</div>
           <div class="stamp-grid" data-role="res-stamps"></div>
         </div>
         <div class="result-actions">
@@ -717,12 +734,24 @@ export class ScreensManager {
     });
     this.syncTitlePwaButton(this.pwaPrompt.canShowTitleButton());
 
-    this.wsW1MainEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-main"]')!;
-    this.wsW1SecretEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-secret"]')!;
-    this.wsW1HighScoreEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-score"]')!;
-    this.wsW1RankEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-rank"]')!;
-    this.wsW1StampsEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-stamps"]')!;
-    this.wsW1PlayLabelEl = this.worldSelectScreen.querySelector('[data-role="ws-w1-play-label"]')!;
+    for (const w of WORLD_CATALOG) {
+      if (!w.playable) continue;
+      const worldKey = w.worldKey as WorldId;
+      const wid = `w${w.id}`;
+      const cardEl = this.worldSelectScreen.querySelector<HTMLDivElement>(
+        `[data-world-key="${worldKey}"]`
+      );
+      if (!cardEl) continue;
+      this.wsCardRefs.set(worldKey, {
+        cardEl,
+        mainEl: cardEl.querySelector(`[data-role="ws-${wid}-main"]`)!,
+        secretEl: cardEl.querySelector(`[data-role="ws-${wid}-secret"]`)!,
+        highScoreEl: cardEl.querySelector(`[data-role="ws-${wid}-score"]`)!,
+        rankEl: cardEl.querySelector(`[data-role="ws-${wid}-rank"]`)!,
+        stampsEl: cardEl.querySelector(`[data-role="ws-${wid}-stamps"]`)!,
+        playLabelEl: cardEl.querySelector(`[data-role="ws-${wid}-play-label"]`)!,
+      });
+    }
 
     this.autoFollowBtns = Array.from(
       this.settingsModal.querySelectorAll<HTMLButtonElement>('[data-setting="auto-follow"]')
@@ -770,6 +799,7 @@ export class ScreensManager {
     this.resCoinsEl = this.resultScreen.querySelector('[data-role="res-coins"]')!;
     this.resDmgEl = this.resultScreen.querySelector('[data-role="res-dmg"]')!;
     this.resStampsEl = this.resultScreen.querySelector('[data-role="res-stamps"]')!;
+    this.resStampTitleEl = this.resultScreen.querySelector('[data-role="res-stamp-title"]')!;
 
     // Event wiring: Title
     this.titleScreen.querySelector('[data-role="play-btn"]')!.addEventListener('click', (e) => {
@@ -803,13 +833,22 @@ export class ScreensManager {
       this.pwaPrompt.open();
     });
 
-    // Event wiring: World Select
-    this.worldSelectScreen.querySelector('[data-role="select-world-1-btn"]')!.addEventListener('click', (e) => {
-      e.stopPropagation();
-      (e.currentTarget as HTMLButtonElement).blur();
-      this.closeModals();
-      handlers.onStartGame();
-    });
+    // Event wiring: World Select (World 1, World 2, ...)
+    this.worldSelectScreen
+      .querySelectorAll<HTMLButtonElement>('[data-select-world]')
+      .forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          btn.blur();
+          this.closeModals();
+          const worldId = btn.dataset.selectWorld as WorldId | undefined;
+          if (worldId === 'world1' || worldId === 'world2') {
+            handlers.onSelectWorld(worldId);
+          } else {
+            handlers.onStartGame();
+          }
+        });
+      });
     this.worldSelectScreen.querySelector('[data-role="ws-back-btn"]')!.addEventListener('click', (e) => {
       e.stopPropagation();
       (e.currentTarget as HTMLButtonElement).blur();
@@ -1091,33 +1130,37 @@ export class ScreensManager {
   }
 
   private renderPauseStamps(
+    worldId: WorldId,
     earnedAll: StampId[],
     mainStars: number,
     secretStars: number,
     coins: number
   ): void {
+    const stampsList = getWorldStamps(worldId);
     const earnedSet = new Set<StampId>(earnedAll);
-    const earnedCount = WORLD1_STAMPS.filter((st) => earnedSet.has(st.id)).length;
-    this.pauseStampsCountEl.textContent = `${earnedCount} / ${WORLD1_STAMPS.length}`;
-    this.pauseStampsGridEl.innerHTML = WORLD1_STAMPS.map((st) => {
-      const earned = earnedSet.has(st.id);
-      const selected = this.selectedPauseStampId === st.id;
-      return `
-        <button
-          type="button"
-          class="pause-stamp-btn ${earned ? 'earned' : 'locked'} ${selected ? 'selected' : ''}"
-          data-stamp-id="${st.id}"
-          title="${st.title}：${st.desc}"
-        >
-          <span class="pause-stamp-ico">${st.icon}</span>
-          <span class="pause-stamp-name">${st.title}</span>
-          <span class="pause-stamp-badge">${earned ? '✓' : '・'}</span>
-        </button>
-      `;
-    }).join('');
+    const earnedCount = stampsList.filter((st) => earnedSet.has(st.id)).length;
+    this.pauseStampsCountEl.textContent = `${earnedCount} / ${stampsList.length}`;
+    this.pauseStampsGridEl.innerHTML = stampsList
+      .map((st) => {
+        const earned = earnedSet.has(st.id);
+        const selected = this.selectedPauseStampId === st.id;
+        return `
+          <button
+            type="button"
+            class="pause-stamp-btn ${earned ? 'earned' : 'locked'} ${selected ? 'selected' : ''}"
+            data-stamp-id="${st.id}"
+            title="${st.title}：${st.desc}"
+          >
+            <span class="pause-stamp-ico">${st.icon}</span>
+            <span class="pause-stamp-name">${st.title}</span>
+            <span class="pause-stamp-badge">${earned ? '✓' : '・'}</span>
+          </button>
+        `;
+      })
+      .join('');
 
     const selectedDef = this.selectedPauseStampId
-      ? WORLD1_STAMPS.find((st) => st.id === this.selectedPauseStampId)
+      ? stampsList.find((st) => st.id === this.selectedPauseStampId)
       : null;
     if (selectedDef) {
       const doneText = earnedSet.has(selectedDef.id) ? '【達成済み】' : '【未達成】';
@@ -1127,20 +1170,29 @@ export class ScreensManager {
     }
   }
 
-  private renderVictoryStamps(earnedAll: StampId[], newlyEarned: StampId[]): void {
+  private renderVictoryStamps(
+    worldId: WorldId,
+    earnedAll: StampId[],
+    newlyEarned: StampId[]
+  ): void {
+    const stampsList = getWorldStamps(worldId);
+    const worldNum = worldId === 'world2' ? '2' : '1';
+    this.resStampTitleEl.textContent = `🏆 ワールド${worldNum} スタンプ`;
     const earnedSet = new Set<StampId>(earnedAll);
     const newSet = new Set<StampId>(newlyEarned);
-    this.resStampsEl.innerHTML = WORLD1_STAMPS.map((st) => {
-      const earned = earnedSet.has(st.id);
-      const isNew = newSet.has(st.id);
-      return `
-        <div class="stamp-card ${earned ? 'earned' : 'locked'}" title="${st.desc}">
-          ${isNew ? '<span class="stamp-new-badge">NEW!</span>' : ''}
-          <div class="stamp-icon">${st.icon}</div>
-          <div class="stamp-name">${st.title}</div>
-        </div>
-      `;
-    }).join('');
+    this.resStampsEl.innerHTML = stampsList
+      .map((st) => {
+        const earned = earnedSet.has(st.id);
+        const isNew = newSet.has(st.id);
+        return `
+          <div class="stamp-card ${earned ? 'earned' : 'locked'}" title="${st.desc}">
+            ${isNew ? '<span class="stamp-new-badge">NEW!</span>' : ''}
+            <div class="stamp-icon">${st.icon}</div>
+            <div class="stamp-name">${st.title}</div>
+          </div>
+        `;
+      })
+      .join('');
   }
 
   update(snap: HudSnapshot): void {
@@ -1237,7 +1289,7 @@ export class ScreensManager {
     }
 
     // Save state dynamic labels ("つづきから" / "はじめから")
-    const saveButtonKey = `${snap.hasSaveProgress}|${snap.hasResumableRun}`;
+    const saveButtonKey = `${snap.activeWorldId}|${snap.hasSaveProgress}|${snap.hasResumableRun}`;
     if (saveButtonKey !== this.lastSaveButtonKey) {
       this.lastSaveButtonKey = saveButtonKey;
       this.titlePlayBtnLabelEl.textContent = snap.hasSaveProgress
@@ -1245,45 +1297,71 @@ export class ScreensManager {
         : '▶ あそぶ！ / PLAY';
       this.titleNewGameBtn.classList.toggle('hidden', !snap.hasSaveProgress);
       this.titleResumeBadgeEl.classList.toggle('hidden', !snap.hasResumableRun);
-      this.wsW1PlayLabelEl.textContent = snap.hasResumableRun
-        ? '▶ つづきからあそぶ！'
-        : '▶ このワールドであそぶ！';
     }
 
-    // Title progress badge
-    const w1 = snap.saveData.worlds.world1 ?? createEmptyWorldProgress();
-    const mainCount = w1.collectedStarIds.filter((id) => id >= 1 && id <= 3).length;
-    const secretCount = w1.collectedStarIds.filter((id) => id >= 4 && id <= 6).length;
-    const saveKey = `${mainCount}|${secretCount}|${w1.stamps.join(',')}|${w1.highScore}|${w1.bestRank ?? '-'}`;
+    // Active world progress for Title / Pause / Victory
+    const activeW = snap.saveData.worlds[snap.activeWorldId] ?? createEmptyWorldProgress();
+    const mainCount = activeW.collectedStarIds.filter((id) => id >= 1 && id <= 3).length;
+    const secretCount = activeW.collectedStarIds.filter((id) => id >= 4 && id <= 6).length;
+    const titleSaveKey = `${snap.activeWorldId}|${mainCount}|${secretCount}|${activeW.stamps.join(',')}|${activeW.highScore}|${activeW.bestRank ?? '-'}`;
 
-    if (snap.phase === 'title' && saveKey !== this.lastTitleSaveKey) {
-      this.lastTitleSaveKey = saveKey;
+    if (snap.phase === 'title' && titleSaveKey !== this.lastTitleSaveKey) {
+      this.lastTitleSaveKey = titleSaveKey;
       this.titleMainStarsEl.textContent = `⭐ ${mainCount}/3`;
       this.titleSecretStarsEl.textContent = `💎 ${secretCount}/3`;
-      this.titleStampsEl.textContent = `🏆 ${w1.stamps.length}/${WORLD1_STAMPS.length}`;
-      this.titleHighScoreEl.textContent = `🏅 ${w1.highScore.toLocaleString()} pts`;
+      this.titleStampsEl.textContent = `🏆 ${activeW.stamps.length}/${WORLD1_STAMPS.length}`;
+      this.titleHighScoreEl.textContent = `🏅 ${activeW.highScore.toLocaleString()} pts`;
     }
 
-    // World select progress
-    if (snap.phase === 'world_select' && saveKey !== this.lastWsSaveKey) {
-      this.lastWsSaveKey = saveKey;
-      this.wsW1MainEl.textContent = `⭐ ${mainCount}/3`;
-      this.wsW1SecretEl.textContent = `💎 ${secretCount}/3`;
-      this.wsW1HighScoreEl.textContent = `🏅 ${w1.highScore.toLocaleString()} pts`;
-      this.wsW1RankEl.textContent = `RANK ${w1.bestRank ?? '-'}`;
-      const stampSet = new Set<StampId>(w1.stamps);
-      this.wsW1StampsEl.innerHTML = WORLD1_STAMPS.map((st) => {
-        const got = stampSet.has(st.id);
-        return `<span class="ws-stamp-dot ${got ? 'earned' : ''}" title="${st.title}：${st.desc}">${st.icon}</span>`;
-      }).join('');
+    // World select progress (per world, completely independent!)
+    if (snap.phase === 'world_select') {
+      const wsParts: string[] = [snap.activeWorldId];
+      for (const [wk] of this.wsCardRefs) {
+        const wp = snap.saveData.worlds[wk] ?? createEmptyWorldProgress();
+        wsParts.push(
+          `${wk}:${wp.collectedStarIds.join(',')}:${wp.stamps.join(',')}:${wp.highScore}:${wp.bestRank ?? '-'}:${wp.run.active ? 1 : 0}`
+        );
+      }
+      const wsKey = wsParts.join('|');
+      if (wsKey !== this.lastWsSaveKey) {
+        this.lastWsSaveKey = wsKey;
+        for (const [wk, refs] of this.wsCardRefs) {
+          const wp = snap.saveData.worlds[wk] ?? createEmptyWorldProgress();
+          const mCnt = wp.collectedStarIds.filter((id) => id >= 1 && id <= 3).length;
+          const sCnt = wp.collectedStarIds.filter((id) => id >= 4 && id <= 6).length;
+          const stampsDef = getWorldStamps(wk);
+          const stampSet = new Set<StampId>(wp.stamps);
+
+          refs.cardEl.classList.toggle('is-active-world', wk === snap.activeWorldId);
+          refs.mainEl.textContent = `⭐ ${mCnt}/3`;
+          refs.secretEl.textContent = `💎 ${sCnt}/3`;
+          refs.highScoreEl.textContent = `🏅 ${wp.highScore.toLocaleString()} pts`;
+          refs.rankEl.textContent = `RANK ${wp.bestRank ?? '-'}`;
+          refs.stampsEl.innerHTML = stampsDef
+            .map((st) => {
+              const got = stampSet.has(st.id);
+              return `<span class="ws-stamp-dot ${got ? 'earned' : ''}" title="${st.title}：${st.desc}">${st.icon}</span>`;
+            })
+            .join('');
+          refs.playLabelEl.textContent = wp.run.active
+            ? '▶ つづきからあそぶ！'
+            : '▶ このワールドであそぶ！';
+        }
+      }
     }
 
     // Pause screen 5-stamp progress
     if (snap.phase === 'paused') {
-      const pauseStampKey = `${w1.stamps.join(',')}|${snap.stars}|${snap.secretStars}|${snap.coins}|${this.selectedPauseStampId ?? ''}`;
+      const pauseStampKey = `${snap.activeWorldId}|${activeW.stamps.join(',')}|${snap.stars}|${snap.secretStars}|${snap.coins}|${this.selectedPauseStampId ?? ''}`;
       if (pauseStampKey !== this.lastPauseStampKey) {
         this.lastPauseStampKey = pauseStampKey;
-        this.renderPauseStamps(w1.stamps, snap.stars, snap.secretStars, snap.coins);
+        this.renderPauseStamps(
+          snap.activeWorldId,
+          activeW.stamps,
+          snap.stars,
+          snap.secretStars,
+          snap.coins
+        );
       }
     }
 
@@ -1300,8 +1378,8 @@ export class ScreensManager {
 
     // Victory / Result screen
     if (snap.phase === 'victory') {
-      const earnedCombined = Array.from(new Set<StampId>([...w1.stamps, ...snap.runStamps]));
-      const vicKey = `${snap.clearRank}|${snap.starPoints}|${snap.isNewHighScore}|${snap.stars}/${snap.totalStars}|${snap.secretStars}/${snap.totalSecretStars}|${snap.coins}|${snap.damageTakenCount}|${earnedCombined.join(',')}|${snap.newlyEarnedStamps.join(',')}`;
+      const earnedCombined = Array.from(new Set<StampId>([...activeW.stamps, ...snap.runStamps]));
+      const vicKey = `${snap.activeWorldId}|${snap.clearRank}|${snap.starPoints}|${snap.isNewHighScore}|${snap.stars}/${snap.totalStars}|${snap.secretStars}/${snap.totalSecretStars}|${snap.coins}|${snap.damageTakenCount}|${earnedCombined.join(',')}|${snap.newlyEarnedStamps.join(',')}`;
       if (vicKey !== this.lastVictoryKey) {
         this.lastVictoryKey = vicKey;
         if (this.rankStage.dataset.rank !== snap.clearRank) {
@@ -1319,7 +1397,7 @@ export class ScreensManager {
         this.resSecretStarsEl.textContent = `${snap.secretStars} / ${snap.totalSecretStars}`;
         this.resCoinsEl.textContent = `${snap.coins.toLocaleString()} まい`;
         this.resDmgEl.textContent = `${snap.damageTakenCount} 回`;
-        this.renderVictoryStamps(earnedCombined, snap.newlyEarnedStamps);
+        this.renderVictoryStamps(snap.activeWorldId, earnedCombined, snap.newlyEarnedStamps);
       }
     }
   }

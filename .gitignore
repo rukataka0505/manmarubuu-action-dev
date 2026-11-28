@@ -28,6 +28,7 @@ game-web/public/models/
 game-web/public/textures/
 game-web/public/ogp.jpg
 game-web/qa-shots/
+game-web/qa-shots-multiworld/
 game-web/ai-pipeline/
 
 # === Blender Binaries, Renders, Logs & Temp Outputs (keep .py / .md scripts) ===

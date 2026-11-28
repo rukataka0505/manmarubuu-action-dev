@@ -102,7 +102,82 @@ export class CollectiblesManager {
     depthWrite: false,
   });
   private starGlowTex: THREE.CanvasTexture;
-  private beaconBeamTex: THREE.CanvasTexture;
+  private indoorCeilingY: number | null = null;
+
+  setIndoorCeilingHeight(maxY: number | null): void {
+    this.indoorCeilingY = maxY;
+  }
+
+  private createBeaconMaterial(
+    colorHex: number,
+    initialOpacity: number,
+    edgePower: number,
+    swirlSpeed: number
+  ): THREE.ShaderMaterial {
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      side: THREE.FrontSide,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+      uniforms: {
+        uColor: { value: new THREE.Color(colorHex) },
+        uOpacity: { value: initialOpacity },
+        uEdgePower: { value: edgePower },
+        uTime: { value: 0 },
+        uSwirlSpeed: { value: swirlSpeed },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+        void main() {
+          vUv = uv;
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorldPos = wp.xyz;
+          vWorldNormal = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        uniform float uOpacity;
+        uniform float uEdgePower;
+        uniform float uTime;
+        uniform float uSwirlSpeed;
+        varying vec2 vUv;
+        varying vec3 vWorldPos;
+        varying vec3 vWorldNormal;
+        void main() {
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+          // View-angle Fresnel attenuation: brightest along pillar axis, dissolves seamlessly to 0 at cylinder silhouette edges
+          float ndotv = max(0.0, dot(normalize(vWorldNormal), viewDir));
+          float radialFade = pow(smoothstep(0.05, 0.96, ndotv), uEdgePower);
+          // Smooth vertical fade at both base and top so pillars never cut off harshly
+          float bottomFade = smoothstep(0.0, 0.10, vUv.y);
+          float topFade = pow(smoothstep(1.0, 0.08, vUv.y), 1.65);
+          // Subtle warm internal shimmer without hard stripes
+          float shimmer = 0.90 + 0.10 * sin(vUv.x * 12.56637 + uTime * uSwirlSpeed);
+          float alpha = radialFade * bottomFade * topFade * shimmer * uOpacity;
+          if (alpha < 0.002) discard;
+          gl_FragColor = vec4(uColor, alpha);
+        }
+      `,
+    });
+  }
+
+  private setBeaconVisual(mesh: THREE.Mesh | undefined, opacity: number, time?: number): void {
+    if (!mesh) return;
+    const mat = mesh.material;
+    if (mat instanceof THREE.ShaderMaterial) {
+      mat.uniforms.uOpacity.value = opacity;
+      if (time !== undefined) {
+        mat.uniforms.uTime.value = time;
+      }
+    } else if (mat instanceof THREE.MeshBasicMaterial) {
+      mat.opacity = opacity;
+    }
+  }
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group);
@@ -141,33 +216,6 @@ export class CollectiblesManager {
     gctx.fillStyle = rg;
     gctx.fillRect(0, 0, 128, 128);
     this.starGlowTex = new THREE.CanvasTexture(glowC);
-
-    // Shared vertical gradient + subtle vertical light-streak texture for Star Beacons
-    const beamC = document.createElement('canvas');
-    beamC.width = 32;
-    beamC.height = 256;
-    const bctx = beamC.getContext('2d')!;
-    const vGrad = bctx.createLinearGradient(0, 256, 0, 0);
-    vGrad.addColorStop(0.0, 'rgba(255, 255, 255, 0.0)');
-    vGrad.addColorStop(0.06, 'rgba(255, 255, 255, 0.96)');
-    vGrad.addColorStop(0.32, 'rgba(255, 255, 255, 0.85)');
-    vGrad.addColorStop(0.70, 'rgba(255, 255, 255, 0.48)');
-    vGrad.addColorStop(0.92, 'rgba(255, 255, 255, 0.16)');
-    vGrad.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
-    bctx.fillStyle = vGrad;
-    bctx.fillRect(0, 0, 32, 256);
-
-    bctx.globalCompositeOperation = 'multiply';
-    for (let x = 0; x < 32; x++) {
-      const wave = 0.78 + 0.22 * Math.sin((x / 32) * Math.PI * 6);
-      const alpha = Math.round(wave * 255);
-      bctx.fillStyle = `rgb(${alpha}, ${alpha}, ${alpha})`;
-      bctx.fillRect(x, 0, 1, 256);
-    }
-    this.beaconBeamTex = new THREE.CanvasTexture(beamC);
-    this.beaconBeamTex.wrapS = THREE.RepeatWrapping;
-    this.beaconBeamTex.wrapT = THREE.ClampToEdgeWrapping;
-    this.beaconBeamTex.colorSpace = THREE.SRGBColorSpace;
 
     this.starBitGeo = this.createStarGeometry(0.36, 0.16, 0.14);
     this.powerStarGeo = this.createStarGeometry(1.15, 0.52, 0.36);
@@ -417,39 +465,51 @@ export class CollectiblesManager {
     ped.receiveShadow = true;
     g.add(ped);
 
-    // Star Beacon: vivid dual-layer golden pillar for main stars; hidden secret stars have no sky pillar (only subtle proximity aura)
+    // Star Beacon: soft Fresnel-attenuated volumetric golden pillar for main stars; hidden secret stars have no sky pillar
+    // Indoor worlds cap beacon height below the room ceiling so pillars never pierce the roof.
     let beaconMesh: THREE.Mesh | undefined;
     let beaconCoreMesh: THREE.Mesh | undefined;
     if (!isSecret) {
-      const outerGeo = new THREE.CylinderGeometry(0.92, 1.75, 68, 12, 1, true);
-      const outerMat = new THREE.MeshBasicMaterial({
-        color: 0xffc838,
-        map: this.beaconBeamTex,
-        transparent: true,
-        opacity: initialUnlocked ? 0.42 : 0.24,
-        side: THREE.FrontSide,
-        blending: THREE.NormalBlending,
-        depthWrite: false,
-        fog: false,
-      });
+      const isIndoor = this.indoorCeilingY !== null;
+      const beamHeight = isIndoor
+        ? THREE.MathUtils.clamp((this.indoorCeilingY as number) - pos.y, 6.0, 20.0)
+        : 68;
+      const beamCenterY = isIndoor ? beamHeight * 0.5 - 0.35 : 32.8;
+      const outerGeo = new THREE.CylinderGeometry(
+        isIndoor ? 1.10 : 1.18,
+        isIndoor ? 1.72 : 2.05,
+        beamHeight,
+        24,
+        1,
+        true
+      );
+      const outerMat = this.createBeaconMaterial(
+        0xffd25a,
+        isIndoor ? (initialUnlocked ? 0.24 : 0.13) : initialUnlocked ? 0.40 : 0.22,
+        2.6,
+        1.1
+      );
       beaconMesh = new THREE.Mesh(outerGeo, outerMat);
-      beaconMesh.position.y = 32.8;
+      beaconMesh.position.y = beamCenterY;
       beaconMesh.renderOrder = 3;
       g.add(beaconMesh);
 
-      const coreGeo = new THREE.CylinderGeometry(0.36, 0.82, 68, 10, 1, true);
-      const coreMat = new THREE.MeshBasicMaterial({
-        color: 0xfff4ad,
-        map: this.beaconBeamTex,
-        transparent: true,
-        opacity: initialUnlocked ? 0.68 : 0.36,
-        side: THREE.FrontSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        fog: false,
-      });
+      const coreGeo = new THREE.CylinderGeometry(
+        isIndoor ? 0.44 : 0.48,
+        isIndoor ? 0.82 : 0.96,
+        beamHeight,
+        20,
+        1,
+        true
+      );
+      const coreMat = this.createBeaconMaterial(
+        0xfff4bd,
+        isIndoor ? (initialUnlocked ? 0.26 : 0.14) : initialUnlocked ? 0.52 : 0.28,
+        3.2,
+        -1.5
+      );
       beaconCoreMesh = new THREE.Mesh(coreGeo, coreMat);
-      beaconCoreMesh.position.y = 32.8;
+      beaconCoreMesh.position.y = beamCenterY;
       beaconCoreMesh.renderOrder = 4;
       g.add(beaconCoreMesh);
     }
@@ -524,17 +584,12 @@ export class CollectiblesManager {
       s.lockDome = undefined;
     }
     if (s.kind === 'secret') {
-      if (s.beaconMesh) {
-        (s.beaconMesh.material as THREE.MeshBasicMaterial).opacity = 0.28;
-      }
+      this.setBeaconVisual(s.beaconMesh, 0.24);
       if (s.haloSprite) (s.haloSprite.material as THREE.SpriteMaterial).opacity = 0.55;
     } else {
-      if (s.beaconMesh) {
-        (s.beaconMesh.material as THREE.MeshBasicMaterial).opacity = 0.42;
-      }
-      if (s.beaconCoreMesh) {
-        (s.beaconCoreMesh.material as THREE.MeshBasicMaterial).opacity = 0.68;
-      }
+      const isIndoor = this.indoorCeilingY !== null;
+      this.setBeaconVisual(s.beaconMesh, isIndoor ? 0.24 : 0.40);
+      this.setBeaconVisual(s.beaconCoreMesh, isIndoor ? 0.26 : 0.52);
       if (s.haloSprite) (s.haloSprite.material as THREE.SpriteMaterial).opacity = 0.88;
     }
     return true;
@@ -565,17 +620,12 @@ export class CollectiblesManager {
       s.lockDome = undefined;
     }
     if (s.kind === 'secret') {
-      if (s.beaconMesh) {
-        (s.beaconMesh.material as THREE.MeshBasicMaterial).opacity = 0.28;
-      }
+      this.setBeaconVisual(s.beaconMesh, 0.24);
       if (s.haloSprite) (s.haloSprite.material as THREE.SpriteMaterial).opacity = 0.55;
     } else {
-      if (s.beaconMesh) {
-        (s.beaconMesh.material as THREE.MeshBasicMaterial).opacity = 0.42;
-      }
-      if (s.beaconCoreMesh) {
-        (s.beaconCoreMesh.material as THREE.MeshBasicMaterial).opacity = 0.68;
-      }
+      const isIndoor = this.indoorCeilingY !== null;
+      this.setBeaconVisual(s.beaconMesh, isIndoor ? 0.24 : 0.40);
+      this.setBeaconVisual(s.beaconCoreMesh, isIndoor ? 0.26 : 0.52);
       if (s.haloSprite) (s.haloSprite.material as THREE.SpriteMaterial).opacity = 0.88;
     }
     return s;
@@ -690,22 +740,61 @@ export class CollectiblesManager {
       if (s.collected) continue;
       s.starMesh.rotation.y = time * 1.9;
       s.starMesh.position.y = Math.sin(time * 2.6) * 0.26;
-      if (s.beaconMesh) {
-        const bScale = 1 + Math.sin(time * 3.0 + s.id) * 0.10;
-        s.beaconMesh.scale.set(bScale, 1, bScale);
-        s.beaconMesh.rotation.y = time * 0.45;
+      const distToStar = Math.hypot(
+        playerPos.x - s.pos.x,
+        playerPos.y + 0.5 - s.pos.y,
+        playerPos.z - s.pos.z
+      );
+      if (s.beaconMesh || s.beaconCoreMesh) {
+        // Fade beacon pillar smoothly to ~0 within 6m so the Power Star silhouette & eyes stay crystal clear up close
+        const beaconFade = THREE.MathUtils.smoothstep(distToStar, 5.5, 16.5);
+        const showBeacon = beaconFade > 0.01;
+        if (s.beaconMesh) {
+          s.beaconMesh.visible = showBeacon;
+          if (showBeacon) {
+            const bScale = 1 + Math.sin(time * 2.6 + s.id) * 0.08;
+            s.beaconMesh.scale.set(bScale, 1, bScale);
+            const baseOuter =
+              this.indoorCeilingY !== null
+                ? s.unlocked
+                  ? 0.24
+                  : 0.13
+                : s.unlocked
+                  ? 0.40
+                  : 0.22;
+            this.setBeaconVisual(s.beaconMesh, baseOuter * beaconFade, time);
+          }
+        }
+        if (s.beaconCoreMesh) {
+          s.beaconCoreMesh.visible = showBeacon;
+          if (showBeacon) {
+            const cScale = 1 + Math.sin(time * 3.1 + s.id + 1.1) * 0.10;
+            s.beaconCoreMesh.scale.set(cScale, 1, cScale);
+            const baseCore =
+              this.indoorCeilingY !== null
+                ? s.unlocked
+                  ? 0.26
+                  : 0.14
+                : s.unlocked
+                  ? 0.52
+                  : 0.28;
+            this.setBeaconVisual(s.beaconCoreMesh, baseCore * beaconFade, time);
+          }
+        }
       }
-      if (s.beaconCoreMesh) {
-        const cScale = 1 + Math.sin(time * 3.6 + s.id + 1.1) * 0.12;
-        s.beaconCoreMesh.scale.set(cScale, 1, cScale);
-        s.beaconCoreMesh.rotation.y = -time * 0.65;
+      if (s.kind !== 'secret' && s.haloSprite) {
+        // Keep close-up halo soft so the cute star eyes aren't washed out
+        const haloCloseFade = THREE.MathUtils.lerp(
+          0.26,
+          1.0,
+          THREE.MathUtils.smoothstep(distToStar, 4.0, 12.0)
+        );
+        const baseHalo = s.unlocked ? 0.84 : 0.44;
+        (s.haloSprite.material as THREE.SpriteMaterial).opacity = baseHalo * haloCloseFade;
+        const sc = THREE.MathUtils.lerp(3.2, 5.4, haloCloseFade);
+        s.haloSprite.scale.set(sc, sc, 1);
       }
       if (s.kind === 'secret' && s.haloSprite) {
-        const distToStar = Math.hypot(
-          playerPos.x - s.pos.x,
-          playerPos.y + 0.5 - s.pos.y,
-          playerPos.z - s.pos.z
-        );
         const proximity = 1 - THREE.MathUtils.clamp((distToStar - 7.0) / 11.0, 0, 1);
         const shimmer = 0.85 + 0.15 * Math.sin(time * 4.2 + s.id * 1.7);
         const baseOp = s.unlocked ? 0.55 : 0.25;

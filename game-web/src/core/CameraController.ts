@@ -139,6 +139,17 @@ export class CameraController {
       bossPos?: THREE.Vector3 | null;
       moveYaw?: number;
       time: number;
+      titleCamera?: {
+        radius: number;
+        yBase: number;
+        yAmp: number;
+        zOffset: number;
+        lookAt: [number, number, number];
+        fov: number;
+        xCenter?: number;
+        xAmp?: number;
+        zAmp?: number;
+      };
     }
   ): void {
     // Cinematic override takes priority
@@ -170,20 +181,35 @@ export class CameraController {
     }
 
     if (options.isTitle) {
-      // Sweeping scenic orbit showcasing World 1 & Manmarubuu
+      // Sweeping scenic orbit showcasing active world & Manmarubuu
+      const tc = options.titleCamera ?? {
+        radius: 58,
+        yBase: 24,
+        yAmp: 4,
+        zOffset: 14,
+        lookAt: [0, 6.5, 2] as [number, number, number],
+        fov: 50,
+      };
       const a = options.time * 0.14;
-      const radius = 58;
-      this.tempDesiredPos.set(
-        Math.sin(a) * radius * 0.72,
-        24 + Math.sin(a * 0.7) * 4,
-        14 + Math.cos(a) * radius * 0.78
-      );
-      this.tempDesiredLook.set(0, 6.5, 2);
+      if (tc.xCenter !== undefined) {
+        this.tempDesiredPos.set(
+          tc.xCenter + Math.sin(a * 0.85) * (tc.xAmp ?? 5.5),
+          tc.yBase + Math.sin(a * 0.6) * tc.yAmp,
+          tc.zOffset + Math.cos(a * 0.75) * (tc.zAmp ?? 1.8)
+        );
+      } else {
+        this.tempDesiredPos.set(
+          Math.sin(a) * tc.radius * 0.72,
+          tc.yBase + Math.sin(a * 0.7) * tc.yAmp,
+          tc.zOffset + Math.cos(a) * tc.radius * 0.78
+        );
+      }
+      this.tempDesiredLook.set(tc.lookAt[0], tc.lookAt[1], tc.lookAt[2]);
       const k = 1 - Math.exp(-3.5 * dt);
       this.currentPos.lerp(this.tempDesiredPos, k);
       this.currentLook.lerp(this.tempDesiredLook, k);
       const prevFov = camera.fov;
-      camera.fov = THREE.MathUtils.lerp(camera.fov, 50, k);
+      camera.fov = THREE.MathUtils.lerp(camera.fov, tc.fov, k);
       if (Math.abs(camera.fov - prevFov) > 0.001) {
         camera.updateProjectionMatrix();
       }

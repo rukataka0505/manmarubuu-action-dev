@@ -1242,6 +1242,14 @@ export class World1Builder {
     }
   }
 
+  dispose(): void {
+    this.group.parent?.remove(this.group);
+    this.cushionSpecs.length = 0;
+    this.extraBossPointLights.length = 0;
+    this.bossDetailObjects.length = 0;
+    this.slabTrimBatch.length = 0;
+  }
+
   update(dt: number): void {
     // Soft damped spring physics for bouncy patchwork cushions!
     for (const c of this.cushionSpecs) {

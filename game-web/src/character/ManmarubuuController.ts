@@ -45,7 +45,10 @@ export class ManmarubuuController {
   public stepMadeDoubleJump = false;
   public stepMadeHipDrop = false;
   public isDead = false;
+  public fallOutEnabled = true;
+  public safeFloorBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
 
+  private lastSlideDir = { x: 0.30, z: -0.95 };
   private coyoteTimer = 0;
   private jumpBufferTimer = 0;
   private jumpBufferFromTap = false;
@@ -354,8 +357,8 @@ export class ManmarubuuController {
           this.vel.x *= boost;
           this.vel.z *= boost;
         } else if (curHoriz <= 0.4) {
-          this.vel.x += 0.30 * 12.0 * dt;
-          this.vel.z += -0.95 * 12.0 * dt;
+          this.vel.x += this.lastSlideDir.x * 12.0 * dt;
+          this.vel.z += this.lastSlideDir.z * 12.0 * dt;
         } else {
           this.vel.x *= Math.exp(-0.3 * dt);
           this.vel.z *= Math.exp(-0.3 * dt);
@@ -501,6 +504,24 @@ export class ManmarubuuController {
     this.wasGrounded = this.grounded;
     this.grounded = res.grounded;
     this.onSlide = res.onSlide;
+    if (res.slideDir) {
+      this.lastSlideDir.x = res.slideDir.x;
+      this.lastSlideDir.z = res.slideDir.z;
+    }
+
+    if (this.safeFloorBounds) {
+      const b = this.safeFloorBounds;
+      if (
+        this.pos.x < b.minX ||
+        this.pos.x > b.maxX ||
+        this.pos.z < b.minZ ||
+        this.pos.z > b.maxZ
+      ) {
+        this.pos.x = THREE.MathUtils.clamp(this.pos.x, b.minX, b.maxX);
+        this.pos.z = THREE.MathUtils.clamp(this.pos.z, b.minZ, b.maxZ);
+        physics.setPlayerPosition(this.pos.x, this.pos.y, this.pos.z);
+      }
+    }
 
     // Cushion automatic bounce!
     if (res.hitCushion && this.vel.y <= 0.5 && this.hipDropState === 'none') {
@@ -546,7 +567,10 @@ export class ManmarubuuController {
     }
 
     // Ledge / cliff panic detection for facial expression (throttled to ~8 Hz while grounded)
-    if (!this.grounded && this.vel.y < -9.5) {
+    if (!this.fallOutEnabled) {
+      this.nearLedge = !this.grounded && this.vel.y < -15.5;
+      this.ledgeCheckTimer = 0;
+    } else if (!this.grounded && this.vel.y < -9.5) {
       this.nearLedge = true;
       this.ledgeCheckTimer = 0;
     } else if (this.grounded) {
@@ -566,8 +590,12 @@ export class ManmarubuuController {
       this.ledgeCheckTimer = 0;
     }
 
-    // Out of bounds fall recovery -> 1 damage + game over at 0 HP or quick return to last safe spot
-    if (this.pos.y < -14.0) {
+    // Out of bounds fall recovery -> 1 damage in sky worlds; zero-damage safe recovery in enclosed floor worlds
+    if (!this.fallOutEnabled && this.pos.y < -6.0) {
+      this.teleport(physics, this.lastSafePos.clone().add(new THREE.Vector3(0, 0.8, 0)));
+      return;
+    }
+    if (this.fallOutEnabled && this.pos.y < -14.0) {
       this.hp = Math.max(0, this.hp - 1);
       this.damageTakenCount += 1;
       if (this.hp <= 0) {

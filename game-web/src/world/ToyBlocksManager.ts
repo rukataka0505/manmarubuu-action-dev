@@ -17,9 +17,22 @@ export interface CustomBlockVisuals {
 interface DynamicInstEntry {
   rec: DynamicBodyRecord;
   proxy: THREE.Object3D;
+  colorIdx?: number;
   syncedOnce?: boolean;
   lastHidden?: boolean;
 }
+
+const RAINBOW_DOMINO_COLORS = [
+  0xef5358, // coral red
+  0xf8983c, // warm orange
+  0xf8d848, // sunny yellow
+  0x7ed458, // apple green
+  0x3ec48f, // mint emerald
+  0x4eaaf2, // sky blue
+  0x6b7ee8, // periwinkle blue
+  0xb272e4, // soft purple
+  0xf272a8, // strawberry pink
+];
 
 interface DynamicInstSlot {
   inst: THREE.InstancedMesh;
@@ -42,6 +55,8 @@ export class ToyBlocksManager {
   private glowCrateMat: THREE.MeshStandardMaterial;
   private blockLetterMats: THREE.MeshStandardMaterial[] = [];
   private dominoMats: THREE.MeshStandardMaterial[] = [];
+  private rainbowDominoMats: THREE.MeshStandardMaterial[] = [];
+  private rainbowDominoMode = false;
   private pinMat: THREE.MeshStandardMaterial;
 
   public tutorialCrateIds = new Set<number>();
@@ -56,6 +71,8 @@ export class ToyBlocksManager {
   private dominoInsts: DynamicInstSlot[] = [];
   private dominoCenter = new THREE.Vector3(24, 1, -2);
   private dominoCullRadiusSq = 95 * 95;
+  private pinCenter = new THREE.Vector3(-21, 1, -29);
+  private pinCullRadiusSq = 60 * 60;
   private pinEntries: DynamicInstEntry[] = [];
   private pinInsts: DynamicInstSlot[] = [];
   private readonly tmpOuterMat = new THREE.Matrix4();
@@ -121,11 +138,27 @@ export class ToyBlocksManager {
         })
     );
 
+    this.rainbowDominoMats = RAINBOW_DOMINO_COLORS.map(
+      (c) =>
+        new THREE.MeshStandardMaterial({
+          color: c,
+          normalMap: oakOrPine?.nor ?? null,
+          normalScale: new THREE.Vector2(0.18, 0.18),
+          roughness: 0.36,
+          metalness: 0.02,
+          envMapIntensity: 0.52,
+        })
+    );
+
     this.pinMat = new THREE.MeshStandardMaterial({
       color: 0xf4efe2,
       roughness: 0.28,
       envMapIntensity: 0.56,
     });
+  }
+
+  setRainbowDominoMode(enabled: boolean): void {
+    this.rainbowDominoMode = enabled;
   }
 
   setVisuals(visuals: CustomBlockVisuals): void {
@@ -198,9 +231,10 @@ export class ToyBlocksManager {
       if (custom) {
         mesh = custom;
       } else {
+        const mats = this.rainbowDominoMode ? this.rainbowDominoMats : this.dominoMats;
         const m = new THREE.Mesh(
           this.fallbackDominoGeo,
-          this.dominoMats[colorIdx % this.dominoMats.length]
+          mats[colorIdx % mats.length]
         );
         m.castShadow = true;
         m.receiveShadow = true;
@@ -218,7 +252,7 @@ export class ToyBlocksManager {
     this.allDominoIds.add(rec.id);
     if (tag === 'east') this.eastDominoIds.add(rec.id);
     if (useInstanced) {
-      this.dominoEntries.push({ rec, proxy: mesh });
+      this.dominoEntries.push({ rec, proxy: mesh, colorIdx });
     }
     return rec;
   }
@@ -258,7 +292,8 @@ export class ToyBlocksManager {
   private buildInstSlots(
     entries: DynamicInstEntry[],
     partsInfo: { parts: MeshPart[] } | null | undefined,
-    existing: DynamicInstSlot[]
+    existing: DynamicInstSlot[],
+    rainbowTint = false
   ): DynamicInstSlot[] {
     for (const s of existing) {
       this.group.remove(s.inst);
@@ -266,8 +301,38 @@ export class ToyBlocksManager {
     }
     if (!partsInfo || entries.length === 0) return [];
     const slots: DynamicInstSlot[] = [];
+    const hsl = { h: 0, s: 0, l: 0 };
+    const tmpCol = new THREE.Color();
     for (const p of partsInfo.parts) {
-      const inst = new THREE.InstancedMesh(p.geometry, p.material, entries.length);
+      let mat: THREE.Material | THREE.Material[] = p.material;
+      let applyPerInstanceRainbow = false;
+      if (rainbowTint && !Array.isArray(p.material) && p.material instanceof THREE.MeshStandardMaterial) {
+        p.material.color.getHSL(hsl);
+        const isLightPipDetail = !p.material.map && hsl.l > 0.78;
+        if (!isLightPipDetail) {
+          const painted = p.material.clone();
+          painted.color.setHex(0xffffff);
+          painted.map = null;
+          if (painted.normalScale) {
+            painted.normalScale = new THREE.Vector2(0.18, 0.18);
+          }
+          painted.roughness = 0.36;
+          painted.metalness = 0.02;
+          painted.envMapIntensity = 0.52;
+          painted.needsUpdate = true;
+          mat = painted;
+          applyPerInstanceRainbow = true;
+        }
+      }
+      const inst = new THREE.InstancedMesh(p.geometry, mat, entries.length);
+      if (applyPerInstanceRainbow) {
+        for (let i = 0; i < entries.length; i++) {
+          const cIdx = entries[i].colorIdx ?? i;
+          tmpCol.setHex(RAINBOW_DOMINO_COLORS[cIdx % RAINBOW_DOMINO_COLORS.length]);
+          inst.setColorAt(i, tmpCol);
+        }
+        if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      }
       inst.castShadow = true;
       inst.receiveShadow = true;
       inst.frustumCulled = false;
@@ -281,7 +346,8 @@ export class ToyBlocksManager {
     this.dominoInsts = this.buildInstSlots(
       this.dominoEntries,
       this.visuals?.getDominoParts?.(),
-      this.dominoInsts
+      this.dominoInsts,
+      this.rainbowDominoMode
     );
     if (this.dominoEntries.length > 0) {
       const box = new THREE.Box3();
@@ -297,6 +363,15 @@ export class ToyBlocksManager {
       this.visuals?.getBowlingPinParts?.(),
       this.pinInsts
     );
+    if (this.pinEntries.length > 0) {
+      const box = new THREE.Box3();
+      for (const e of this.pinEntries) {
+        box.expandByPoint(e.proxy.position);
+      }
+      box.getCenter(this.pinCenter);
+      const r = box.getSize(new THREE.Vector3()).length() * 0.5 + 54;
+      this.pinCullRadiusSq = r * r;
+    }
     this.syncDynamicInstances('medium');
   }
 
@@ -347,7 +422,7 @@ export class ToyBlocksManager {
     const showPins =
       resolvedQuality !== 'low' ||
       !camPos ||
-      Math.hypot(camPos.x + 21, camPos.z + 29) <= 54;
+      this.pinCenter.distanceToSquared(camPos) <= this.pinCullRadiusSq;
     for (const slot of this.pinInsts) {
       slot.inst.visible = showPins;
     }

@@ -37,7 +37,16 @@ export class SkyboxAndLighting {
   private readonly duskHemiSky = new THREE.Color(0x4c5ca8);
   private readonly dayHemiGround = new THREE.Color(0x68583c);
   private readonly duskHemiGround = new THREE.Color(0x4a2f1e);
+  private readonly indoorSunCol = new THREE.Color(0xffe19c);
+  private readonly indoorBossSunCol = new THREE.Color(0xffbe72);
+  private readonly indoorHemiSky = new THREE.Color(0xfff6dc);
+  private readonly indoorBossHemiSky = new THREE.Color(0xffe4bd);
+  private readonly indoorHemiGround = new THREE.Color(0xc89a64);
+  private readonly indoorBossHemiGround = new THREE.Color(0x9e7248);
+  private readonly indoorFillCol = new THREE.Color(0xffe6be);
+  private readonly outdoorFillCol = new THREE.Color(0xfff3dc);
   private readonly tmpSunDir = new THREE.Vector3();
+  private indoorMode = false;
 
   constructor(scene: THREE.Scene, initialQuality: ResolvedQuality = 'medium') {
     // Dual-mood sunlit sky dome <-> dusk starry gradient sky dome for Boss Arena
@@ -338,26 +347,51 @@ export class SkyboxAndLighting {
     this.sunLight.shadow.needsUpdate = true;
   }
 
+  setIndoorMode(indoor: boolean): void {
+    this.indoorMode = indoor;
+    if (this.seaCloudMesh) {
+      this.seaCloudMesh.visible = !indoor;
+    }
+    if (indoor) {
+      this.dayCloudInst.visible = false;
+      if (this.duskCloudMesh) this.duskCloudMesh.visible = false;
+    }
+  }
+
   update(dt: number, playerPos: THREE.Vector3, time: number, bossMood = 0): void {
     const t = THREE.MathUtils.clamp(bossMood, 0, 1);
-    this.skyMat.uniforms.uBossMood.value = t;
+    this.skyMat.uniforms.uBossMood.value = this.indoorMode ? t * 0.35 : t;
     this.skyMat.uniforms.uTime.value = time;
 
     // Interpolate angled sunlight from crisp golden midday -> warm low sunset angle
-    this.sunLight.color.lerpColors(this.daySunCol, this.duskSunCol, t);
-    this.sunLight.intensity = THREE.MathUtils.lerp(2.45, 2.20, t);
-
-    this.hemiLight.color.lerpColors(this.dayHemiSky, this.duskHemiSky, t);
-    this.hemiLight.groundColor.lerpColors(this.dayHemiGround, this.duskHemiGround, t);
-    this.hemiLight.intensity = THREE.MathUtils.lerp(0.40, 0.44, t);
-    this.fillLight.intensity = THREE.MathUtils.lerp(0.12, 0.14, t);
+    if (this.indoorMode) {
+      // Warm sunlit playroom morning diagonal light + grounded honey bounce (rich felt contrast without washout)
+      this.sunLight.color.lerpColors(this.indoorSunCol, this.indoorBossSunCol, t * 0.65);
+      this.sunLight.intensity = THREE.MathUtils.lerp(3.05, 2.65, t);
+      this.hemiLight.color.lerpColors(this.indoorHemiSky, this.indoorBossHemiSky, t * 0.55);
+      this.hemiLight.groundColor.lerpColors(this.indoorHemiGround, this.indoorBossHemiGround, t * 0.55);
+      this.hemiLight.intensity = THREE.MathUtils.lerp(0.58, 0.54, t);
+      this.fillLight.color.copy(this.indoorFillCol);
+      this.fillLight.position.set(-34, 18, 28);
+      this.fillLight.intensity = THREE.MathUtils.lerp(0.30, 0.26, t);
+    } else {
+      this.sunLight.color.lerpColors(this.daySunCol, this.duskSunCol, t);
+      this.sunLight.intensity = THREE.MathUtils.lerp(2.45, 2.20, t);
+      this.hemiLight.color.lerpColors(this.dayHemiSky, this.duskHemiSky, t);
+      this.hemiLight.groundColor.lerpColors(this.dayHemiGround, this.duskHemiGround, t);
+      this.hemiLight.intensity = THREE.MathUtils.lerp(0.40, 0.44, t);
+      this.fillLight.color.copy(this.outdoorFillCol);
+      this.fillLight.position.set(-45, 22, -35);
+      this.fillLight.intensity = THREE.MathUtils.lerp(0.12, 0.14, t);
+    }
 
     const sx = Math.round(playerPos.x);
     const sy = Math.round(playerPos.y);
     const sz = Math.round(playerPos.z);
-    const sunOffX = THREE.MathUtils.lerp(46, -52, t);
-    const sunOffY = THREE.MathUtils.lerp(30, 18, t);
-    const sunOffZ = THREE.MathUtils.lerp(26, -44, t);
+    // Indoor playroom morning sun streams diagonally at a warm low angle from the East-North windows (+X, +Y, -Z)
+    const sunOffX = this.indoorMode ? THREE.MathUtils.lerp(38, 22, t) : THREE.MathUtils.lerp(46, -52, t);
+    const sunOffY = this.indoorMode ? THREE.MathUtils.lerp(25, 22, t) : THREE.MathUtils.lerp(30, 18, t);
+    const sunOffZ = this.indoorMode ? THREE.MathUtils.lerp(-20, -28, t) : THREE.MathUtils.lerp(26, -44, t);
     this.sunLight.target.position.set(sx, sy, sz);
     this.sunLight.position.set(sx + sunOffX, sy + sunOffY, sz + sunOffZ);
     this.sunLight.target.updateMatrixWorld();
@@ -366,6 +400,14 @@ export class SkyboxAndLighting {
     this.dayCloudMat.uniforms.uSunDir.value.copy(this.tmpSunDir);
     this.duskCloudMat.uniforms.uSunDir.value.copy(this.tmpSunDir);
     this.seaCloudMat.uniforms.uSunDir.value.copy(this.tmpSunDir);
+
+    if (this.indoorMode) {
+      this.dayCloudInst.visible = false;
+      if (this.duskCloudMesh) this.duskCloudMesh.visible = false;
+      if (this.seaCloudMesh) this.seaCloudMesh.visible = false;
+      void dt;
+      return;
+    }
 
     const dayOp = Math.max(0, 1.0 - t * 2.2);
     this.dayCloudMat.uniforms.uOpacity.value = dayOp;

@@ -57,6 +57,8 @@ export type BgmMode = 'title' | 'explore' | 'fever' | 'boss' | 'victory' | 'none
 
 export type StarKind = 'main' | 'secret';
 
+export type WorldId = 'world1' | 'world2';
+
 export type StampId =
   | 'clear_w1'
   | 'all_main_stars'
@@ -175,6 +177,8 @@ export interface RewardCardInfo {
 
 export interface HudSnapshot {
   phase: GamePhase;
+  activeWorldId: WorldId;
+  activeWorldName: string;
   hp: number;
   maxHp: number;
   stars: number;

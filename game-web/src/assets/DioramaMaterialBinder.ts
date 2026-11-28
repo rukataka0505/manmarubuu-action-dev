@@ -253,6 +253,76 @@ export class DioramaMaterialBinder {
     return built;
   }
 
+  private enhancePlayroomMaterial(mat: THREE.Material): void {
+    if (!(mat instanceof THREE.MeshStandardMaterial)) return;
+    if (!mat.name.startsWith('Playroom_')) return;
+
+    const oak = this.pbr?.cloneMaps('oakVeneer', 1, 1);
+    const fleece = this.pbr?.cloneMaps('polarFleece', 2, 2);
+
+    switch (mat.name) {
+      case 'Playroom_oak':
+      case 'Playroom_maple':
+        if (oak?.nor && !mat.normalMap) {
+          mat.normalMap = oak.nor;
+          mat.normalScale = new THREE.Vector2(0.34, 0.34);
+        }
+        if (oak?.rough && !mat.roughnessMap) {
+          mat.roughnessMap = oak.rough;
+        }
+        mat.roughness = 0.50;
+        mat.metalness = 0.02;
+        mat.envMapIntensity = 0.55;
+        mat.needsUpdate = true;
+        break;
+
+      case 'Playroom_brass':
+        mat.metalness = 0.84;
+        mat.roughness = 0.24;
+        mat.envMapIntensity = 1.15;
+        mat.needsUpdate = true;
+        break;
+
+      case 'Playroom_print':
+        mat.roughness = 0.36;
+        mat.metalness = 0.02;
+        mat.envMapIntensity = 0.50;
+        mat.needsUpdate = true;
+        break;
+
+      case 'Playroom_milk':
+      case 'Playroom_paper':
+        if (fleece?.nor && !mat.normalMap) {
+          mat.normalMap = fleece.nor;
+          mat.normalScale = new THREE.Vector2(0.18, 0.18);
+        }
+        mat.roughness = 0.72;
+        mat.metalness = 0.0;
+        mat.envMapIntensity = 0.44;
+        mat.needsUpdate = true;
+        break;
+
+      case 'Playroom_ink':
+        mat.roughness = 0.58;
+        mat.metalness = 0.08;
+        mat.envMapIntensity = 0.42;
+        mat.needsUpdate = true;
+        break;
+
+      default:
+        // Playroom_mint / rose / gold / teal / blue / plum (painted satin craft wood & fabric)
+        if (oak?.nor && !mat.normalMap) {
+          mat.normalMap = oak.nor;
+          mat.normalScale = new THREE.Vector2(0.20, 0.20);
+        }
+        mat.roughness = 0.46;
+        mat.metalness = 0.02;
+        mat.envMapIntensity = 0.54;
+        mat.needsUpdate = true;
+        break;
+    }
+  }
+
   bindRoot(root: THREE.Object3D): void {
     const cacheVals = new Set(this.cache.values());
     const replacedOld = new Set<THREE.Material>();
@@ -266,6 +336,7 @@ export class DioramaMaterialBinder {
             replacedOld.add(m);
             return bound;
           }
+          this.enhancePlayroomMaterial(m);
           return m;
         });
       } else if (obj.material) {
@@ -274,6 +345,8 @@ export class DioramaMaterialBinder {
         if (bound && bound !== m) {
           replacedOld.add(m);
           obj.material = bound;
+        } else {
+          this.enhancePlayroomMaterial(m);
         }
       }
     });

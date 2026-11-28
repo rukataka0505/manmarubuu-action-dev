@@ -91,6 +91,7 @@ export class GameEngine {
   private n8aoPass: N8AOPostPass | null = null;
   private dayEnvTex: THREE.Texture | null = null;
   private duskEnvTex: THREE.Texture | null = null;
+  private indoorEnvTex: THREE.Texture | null = null;
   private hitStopTimer = 0;
   private quality: ResolvedQuality = 'medium';
   private pixelRatioCap = 1.25;
@@ -111,7 +112,9 @@ export class GameEngine {
   private viewportHeight = 1;
 
   private readonly dayFogColor = new THREE.Color(0x9bdcff);
+  private readonly indoorFogColor = new THREE.Color(0xfff1d8);
   private readonly duskFogColor = new THREE.Color(0x201c36);
+  private indoorMode = false;
 
   constructor(canvas: HTMLCanvasElement, initialQuality: ResolvedQuality = 'medium') {
     this.isMobileDevice = isMobileDefaultDevice();
@@ -155,6 +158,20 @@ export class GameEngine {
     const hemi = new THREE.HemisphereLight(0xfffdf2, 0x6b9c4a, 1.5);
     envScene.add(hemi);
     this.dayEnvTex = pmrem.fromScene(envScene, 0.04).texture;
+
+    // Dedicated warm sunlit playroom PMREM (eliminates cool sky-blue tint on indoor walls & plush)
+    const indoorEnvScene = new THREE.Scene();
+    indoorEnvScene.background = new THREE.Color(0xffefcf);
+    const inHemi = new THREE.HemisphereLight(0xfff8e6, 0xd8a872, 2.0);
+    indoorEnvScene.add(inHemi);
+    const inWindowGlow = new THREE.DirectionalLight(0xffe6aa, 2.2);
+    inWindowGlow.position.set(12, 8, -6);
+    indoorEnvScene.add(inWindowGlow);
+    const inWarmBounce = new THREE.DirectionalLight(0xffdfba, 1.0);
+    inWarmBounce.position.set(-10, 4, 10);
+    indoorEnvScene.add(inWarmBounce);
+    this.indoorEnvTex = pmrem.fromScene(indoorEnvScene, 0.04).texture;
+
     this.scene.environment = this.dayEnvTex;
     this.scene.environmentIntensity = 0.54;
     pmrem.dispose();
@@ -191,9 +208,9 @@ export class GameEngine {
       try {
         const n8ao = new N8AOPostPass(this.scene, this.camera, w, h);
         n8ao.configuration.halfRes = true;
-        n8ao.configuration.aoRadius = 0.55;
-        n8ao.configuration.distanceFalloff = 1.2;
-        n8ao.configuration.intensity = 3.2;
+        n8ao.configuration.aoRadius = this.indoorMode ? 0.85 : 0.55;
+        n8ao.configuration.distanceFalloff = this.indoorMode ? 1.15 : 1.2;
+        n8ao.configuration.intensity = this.indoorMode ? 3.85 : 3.2;
         n8ao.configuration.aoSamples = 8;
         n8ao.configuration.denoiseSamples = 4;
         n8ao.configuration.denoiseIterations = 1;
@@ -393,8 +410,14 @@ export class GameEngine {
         }
 
         pmrem.dispose();
-        this.scene.environment = this.currentBossMood > 0.5 && this.duskEnvTex ? this.duskEnvTex : this.dayEnvTex;
-        this.scene.environmentIntensity = THREE.MathUtils.lerp(0.54, 0.76, this.currentBossMood);
+        if (this.indoorMode && this.indoorEnvTex) {
+          this.scene.environment = this.indoorEnvTex;
+          this.scene.environmentIntensity = THREE.MathUtils.lerp(0.50, 0.54, this.currentBossMood);
+        } else {
+          this.scene.environment =
+            this.currentBossMood > 0.5 && this.duskEnvTex ? this.duskEnvTex : this.dayEnvTex;
+          this.scene.environmentIntensity = THREE.MathUtils.lerp(0.54, 0.76, this.currentBossMood);
+        }
         this.hdriLoaded = true;
         return true;
       } catch {
@@ -408,20 +431,41 @@ export class GameEngine {
     return this.hdriLoadPromise;
   }
 
+  setIndoorMode(indoor: boolean): void {
+    this.indoorMode = indoor;
+    if (this.n8aoPass) {
+      this.n8aoPass.configuration.aoRadius = indoor ? 0.85 : 0.55;
+      this.n8aoPass.configuration.distanceFalloff = indoor ? 1.15 : 1.2;
+      this.n8aoPass.configuration.intensity = indoor ? 3.85 : 3.2;
+    }
+    this.setBossMood(this.currentBossMood);
+  }
+
   setBossMood(mood01: number): void {
     const t = THREE.MathUtils.clamp(mood01, 0, 1);
     this.currentBossMood = t;
-    const useDusk = t > 0.5 && this.duskEnvTex !== null;
-    const desiredEnv = useDusk ? this.duskEnvTex : this.dayEnvTex;
+    const useDusk = !this.indoorMode && t > 0.5 && this.duskEnvTex !== null;
+    const desiredEnv = this.indoorMode
+      ? this.indoorEnvTex ?? this.dayEnvTex
+      : useDusk
+        ? this.duskEnvTex
+        : this.dayEnvTex;
     if (desiredEnv && this.scene.environment !== desiredEnv) {
       this.scene.environment = desiredEnv;
     }
-    this.scene.environmentIntensity = THREE.MathUtils.lerp(0.54, 0.76, t);
-    this.renderer.toneMappingExposure = THREE.MathUtils.lerp(0.98, 1.04, t);
+    this.scene.environmentIntensity = this.indoorMode
+      ? THREE.MathUtils.lerp(0.50, 0.54, t)
+      : THREE.MathUtils.lerp(0.54, 0.76, t);
+    this.renderer.toneMappingExposure = this.indoorMode
+      ? THREE.MathUtils.lerp(0.99, 1.00, t)
+      : THREE.MathUtils.lerp(0.98, 1.04, t);
 
     if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.lerpColors(this.dayFogColor, this.duskFogColor, t);
-      this.scene.fog.density = THREE.MathUtils.lerp(0.0020, 0.00075, t);
+      const baseFog = this.indoorMode ? this.indoorFogColor : this.dayFogColor;
+      this.scene.fog.color.lerpColors(baseFog, this.duskFogColor, this.indoorMode ? t * 0.14 : t);
+      this.scene.fog.density = this.indoorMode
+        ? THREE.MathUtils.lerp(0.00034, 0.00028, t)
+        : THREE.MathUtils.lerp(0.0020, 0.00075, t);
     }
   }
 

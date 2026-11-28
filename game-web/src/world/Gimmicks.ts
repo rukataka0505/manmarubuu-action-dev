@@ -76,6 +76,13 @@ export class GimmicksManager {
   public victoryChest!: VictoryChest;
 
   private bridgeColliderAdded = false;
+  private bridgeStartY = 1.22;
+  private bridgeMidY = 2.39;
+  private bridgeStartZ = -13.8;
+  private bridgeMidZ = -24.0;
+  private bridgeHalfLen = 10.35;
+  private bridgeWidth = 5.2;
+  private bridgeSlopeAngle = Math.atan2(2.8, 20.4);
   private textures = getProceduralTextures();
   private pbr?: PbrAssets;
   private factories?: GimmickCustomFactories;
@@ -86,6 +93,14 @@ export class GimmicksManager {
     scene.add(this.group);
     scene.add(this.rainbowBridgeGroup);
     this.pbr = pbr;
+  }
+
+  dispose(): void {
+    if (activeBossPopupSpring && this.springs.includes(activeBossPopupSpring)) {
+      activeBossPopupSpring = null;
+    }
+    this.group.parent?.remove(this.group);
+    this.rainbowBridgeGroup.parent?.remove(this.rainbowBridgeGroup);
   }
 
   setCustomFactories(factories: GimmickCustomFactories): void {
@@ -384,12 +399,24 @@ export class GimmicksManager {
     return cp;
   }
 
-  buildStarGateAndRainbowBridge(physics: PhysicsWorld): void {
+  buildStarGateAndRainbowBridge(
+    physics: PhysicsWorld,
+    opts?: {
+      gatePos?: THREE.Vector3;
+      bridgeFromZ?: number;
+      bridgeFromY?: number;
+      bridgeToZ?: number;
+      bridgeToY?: number;
+      bridgeWidth?: number;
+    }
+  ): void {
     this.physics = physics;
-    // 3-Star Boss Gate securely grounded inside Center Castle Hub at (0, 1.2, -13.2)
-    const gateZ = -13.2;
+    const gatePos = opts?.gatePos ?? new THREE.Vector3(0, 1.2, -13.2);
+    const gateX = gatePos.x;
+    const gateY = gatePos.y;
+    const gateZ = gatePos.z;
     const gate = new THREE.Group();
-    gate.position.set(0, 1.2, gateZ);
+    gate.position.set(gateX, gateY, gateZ);
 
     const customGate = this.factories?.createStarGate();
     if (customGate) {
@@ -404,11 +431,11 @@ export class GimmicksManager {
 
     // Physical colliders for Twin Gate Pillars
     for (const sx of [-4.6, 4.6]) {
-      physics.addStaticBox(sx, 5.8, gateZ, 0.95, 4.6, 0.95);
+      physics.addStaticBox(gateX + sx, gateY + 4.6, gateZ, 0.95, 4.6, 0.95);
     }
 
     // Temporary physical barrier sealing the 3-Star Gate opening until all 3 gold stars unlock the Rainbow Bridge
-    const gateLockCol = physics.addStaticBox(0, 7.6, gateZ, 3.7, 6.4, 0.35, {
+    const gateLockCol = physics.addStaticBox(gateX, gateY + 6.4, gateZ, 3.7, 6.4, 0.35, {
       friction: 0.0,
       ignoreRays: true,
     });
@@ -434,11 +461,29 @@ export class GimmicksManager {
 
     this.group.add(gate);
 
-    // Rainbow Bridge spanning Z = -13.8 (Star Gate base Y = 1.22) -> Z = -34.2 (Arena Y = 4.02)
-    // Framed with beveled honey-oak side rails & brass trim so it joins the Boss Arena seamlessly!
-    const bridgeLen = 20.6;
-    const slopeAngle = Math.atan2(2.8, 20.4);
-    this.rainbowBridgeGroup.position.set(0, 2.39, -24.0);
+    // Rainbow Bridge spanning from gate side -> boss arena rim
+    const fromZ = opts?.bridgeFromZ ?? -13.8;
+    const fromY = opts?.bridgeFromY ?? 1.22;
+    const toZ = opts?.bridgeToZ ?? -34.2;
+    const toY = opts?.bridgeToY ?? 4.02;
+    const width = opts?.bridgeWidth ?? 5.2;
+
+    const dz = Math.abs(fromZ - toZ);
+    const dy = toY - fromY;
+    const bridgeLen = Math.hypot(dz, dy);
+    const slopeAngle = Math.atan2(dy, dz);
+    const midY = (fromY + toY) * 0.5 - 0.23;
+    const midZ = (fromZ + toZ) * 0.5;
+
+    this.bridgeStartY = fromY;
+    this.bridgeMidY = midY;
+    this.bridgeStartZ = fromZ;
+    this.bridgeMidZ = midZ;
+    this.bridgeHalfLen = bridgeLen * 0.5 + 0.1;
+    this.bridgeWidth = width;
+    this.bridgeSlopeAngle = slopeAngle;
+
+    this.rainbowBridgeGroup.position.set(gateX, midY, midZ);
     this.rainbowBridgeGroup.rotation.x = slopeAngle;
 
     const bridgeMat = new THREE.MeshPhysicalMaterial({
@@ -450,12 +495,12 @@ export class GimmicksManager {
       transparent: true,
       opacity: 0.0,
     });
-    const deckMesh = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.36, bridgeLen), bridgeMat);
+    const deckMesh = new THREE.Mesh(new THREE.BoxGeometry(width, 0.36, bridgeLen), bridgeMat);
     deckMesh.receiveShadow = true;
     deckMesh.castShadow = true;
     this.rainbowBridgeGroup.add(deckMesh);
 
-    const oak = this.pbr?.cloneMaps('oakVeneer', 1, 5);
+    const oak = this.pbr?.cloneMaps('oakVeneer', 1, Math.max(2, Math.round(bridgeLen / 4)));
     const railMat = new THREE.MeshStandardMaterial({
       color: 0xd9a162,
       map: oak?.diff ?? null,
@@ -477,7 +522,8 @@ export class GimmicksManager {
 
     const animMats: THREE.MeshStandardMaterial[] = [bridgeMat, railMat, brassMat];
 
-    for (const sx of [-2.76, 2.76]) {
+    const sideOff = width * 0.5 + 0.16;
+    for (const sx of [-sideOff, sideOff]) {
       const sideBeam = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.56, bridgeLen + 0.2), railMat);
       sideBeam.position.set(sx, 0.04, 0);
       sideBeam.castShadow = true;
@@ -489,9 +535,9 @@ export class GimmicksManager {
     }
     // Decorative brass end sills cleanly docking to Castle Gate and Boss Arena deck rim
     for (const sz of [-bridgeLen * 0.5 + 0.16, bridgeLen * 0.5 - 0.16]) {
-      const sill = new THREE.Mesh(new THREE.BoxGeometry(5.96, 0.42, 0.36), railMat);
+      const sill = new THREE.Mesh(new THREE.BoxGeometry(width + 0.76, 0.42, 0.36), railMat);
       sill.position.set(0, 0.0, sz);
-      const brassStrip = new THREE.Mesh(new THREE.BoxGeometry(5.76, 0.10, 0.16), brassMat);
+      const brassStrip = new THREE.Mesh(new THREE.BoxGeometry(width + 0.56, 0.10, 0.16), brassMat);
       brassStrip.position.set(0, 0.20, sz);
       this.rainbowBridgeGroup.add(sill, brassStrip);
     }
@@ -556,11 +602,18 @@ export class GimmicksManager {
     if (!this.bridgeColliderAdded) {
       this.bridgeColliderAdded = true;
       const physics = this.rainbowBridgeGroup.userData.physics as PhysicsWorld;
-      const slopeAngle = Math.atan2(2.8, 20.4);
-      physics.addStaticBox(0, 2.39, -24.0, 2.8, 0.22, 10.35, {
-        rotEuler: new THREE.Euler(slopeAngle, 0, 0),
-        friction: 0.65,
-      });
+      physics.addStaticBox(
+        0,
+        this.bridgeMidY,
+        this.bridgeMidZ,
+        this.bridgeWidth * 0.5 + 0.2,
+        0.22,
+        this.bridgeHalfLen,
+        {
+          rotEuler: new THREE.Euler(this.bridgeSlopeAngle, 0, 0),
+          friction: 0.65,
+        }
+      );
     }
 
     if (this.bossLockColliders.length > 0) {
@@ -590,14 +643,15 @@ export class GimmicksManager {
     this.rainbowBridgeGroup.scale.z = sz;
     this.rainbowBridgeGroup.position.set(
       0,
-      THREE.MathUtils.lerp(1.22, 2.39, ease),
-      THREE.MathUtils.lerp(-13.8, -24.0, ease)
+      THREE.MathUtils.lerp(this.bridgeStartY, this.bridgeMidY, ease),
+      THREE.MathUtils.lerp(this.bridgeStartZ, this.bridgeMidZ, ease)
     );
   }
 
-  buildVictoryChest(): void {
+  buildVictoryChest(initialPos?: THREE.Vector3): void {
+    const pos = initialPos ?? new THREE.Vector3(0, 4.0, -52);
     const g = new THREE.Group();
-    g.position.set(0, 4.0, -52);
+    g.position.copy(pos);
     g.visible = false;
 
     const chestMat = new THREE.MeshStandardMaterial({ color: 0x72cfc8, roughness: 0.36 });
@@ -635,7 +689,7 @@ export class GimmicksManager {
 
     this.group.add(g);
     this.victoryChest = {
-      pos: new THREE.Vector3(0, 4.0, -52),
+      pos: pos.clone(),
       group: g,
       lidPivot,
       spawned: false,

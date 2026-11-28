@@ -16,7 +16,9 @@ import { SkyboxAndLighting } from './world/SkyboxAndLighting';
 import { ToyBlocksManager } from './world/ToyBlocksManager';
 import { CollectiblesManager } from './world/Collectibles';
 import { GimmicksManager } from './world/Gimmicks';
-import { World1Builder } from './world/World1Builder';
+import { World1Builder, type WorldBuildResult } from './world/World1Builder';
+import { World1PlayroomBuilder } from './world/World1PlayroomBuilder';
+import { getWorldConfig, isValidWorldId, type WorldConfig } from './world/WorldConfig';
 import { WorldPropsManager } from './world/WorldPropsManager';
 import { CraftTerrainBuilder } from './world/CraftTerrainBuilder';
 import { StylizedGrassField } from './world/StylizedGrassField';
@@ -49,6 +51,7 @@ import type {
   SaveData,
   StampId,
   StarInfo,
+  WorldId,
 } from './types';
 
 const CHECKPOINT_GUIDE_SEEN_KEY = 'manmarubuu_checkpoint_guide_seen_v1';
@@ -58,6 +61,10 @@ interface RunBonusHpSidecar {
   maxHp: number;
   hp: number;
   updatedAt: number;
+}
+
+function bonusHpKeyForWorld(worldId: WorldId): string {
+  return `${RUN_BONUS_HP_KEY}_${worldId}`;
 }
 
 function readCheckpointGuideSeen(): boolean {
@@ -80,9 +87,11 @@ function writeCheckpointGuideSeen(seen: boolean): void {
   }
 }
 
-function readRunBonusHpSidecar(): RunBonusHpSidecar | null {
+function readRunBonusHpSidecar(worldId: WorldId): RunBonusHpSidecar | null {
   try {
-    const raw = window.localStorage.getItem(RUN_BONUS_HP_KEY);
+    const raw =
+      window.localStorage.getItem(bonusHpKeyForWorld(worldId)) ??
+      (worldId === 'world1' ? window.localStorage.getItem(RUN_BONUS_HP_KEY) : null);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<RunBonusHpSidecar>;
     if (
@@ -105,22 +114,36 @@ function readRunBonusHpSidecar(): RunBonusHpSidecar | null {
   }
 }
 
-function writeRunBonusHpSidecar(maxHp: number, hp: number, updatedAt: number): void {
+function writeRunBonusHpSidecar(
+  worldId: WorldId,
+  maxHp: number,
+  hp: number,
+  updatedAt: number
+): void {
   try {
     const payload: RunBonusHpSidecar = {
       maxHp: Math.max(3, Math.min(4, Math.floor(maxHp))),
       hp: Math.max(1, Math.min(4, Math.floor(hp))),
       updatedAt,
     };
-    window.localStorage.setItem(RUN_BONUS_HP_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(bonusHpKeyForWorld(worldId), JSON.stringify(payload));
   } catch {
     // Ignore storage errors
   }
 }
 
-function clearRunBonusHpSidecar(): void {
+function clearRunBonusHpSidecar(worldId?: WorldId): void {
   try {
-    window.localStorage.removeItem(RUN_BONUS_HP_KEY);
+    if (worldId) {
+      window.localStorage.removeItem(bonusHpKeyForWorld(worldId));
+      if (worldId === 'world1') {
+        window.localStorage.removeItem(RUN_BONUS_HP_KEY);
+      }
+    } else {
+      window.localStorage.removeItem(RUN_BONUS_HP_KEY);
+      window.localStorage.removeItem(bonusHpKeyForWorld('world1'));
+      window.localStorage.removeItem(bonusHpKeyForWorld('world2'));
+    }
   } catch {
     // Ignore storage errors
   }
@@ -391,13 +414,33 @@ async function bootstrap(): Promise<void> {
   await pbr.load(useMobileLods);
   updateBootLoader(38, '3Dモデルを よびだしちゅう…');
   getProceduralTextures(useMobileLods);
-  const blocks = new ToyBlocksManager(engine.scene, pbr);
-  const collectibles = new CollectiblesManager(engine.scene);
-  const gimmicks = new GimmicksManager(engine.scene, pbr);
-  const terrain = new CraftTerrainBuilder(engine.scene, pbr, useMobileLods);
-  const grassField = new StylizedGrassField(engine.scene);
+
+  type AnyWorldBuilder = World1PlayroomBuilder | World1Builder;
+  const resolveInitialWorldId = (): WorldId => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('world');
+      if (isValidWorldId(q)) return q;
+    } catch {
+      // Ignore URL parse errors
+    }
+    if (isValidWorldId(currentSaveData.lastPlayedWorldId)) {
+      return currentSaveData.lastPlayedWorldId;
+    }
+    return 'world1';
+  };
+  let activeWorldId: WorldId = resolveInitialWorldId();
+  let activeWorldConfig: WorldConfig = getWorldConfig(activeWorldId);
+
+  let blocks = new ToyBlocksManager(engine.scene, pbr);
+  let collectibles = new CollectiblesManager(engine.scene);
+  let gimmicks = new GimmicksManager(engine.scene, pbr);
+  let terrain = new CraftTerrainBuilder(engine.scene, pbr, useMobileLods);
+  let grassField = new StylizedGrassField(engine.scene);
   const worldProps = new WorldPropsManager(engine.scene);
-  const builder = new World1Builder(engine.scene, pbr);
+  let builder: AnyWorldBuilder =
+    activeWorldId === 'world1'
+      ? new World1PlayroomBuilder(engine.scene, pbr)
+      : new World1Builder(engine.scene, pbr);
 
   // Load Model Swap Manifest, Hero 3D Model, Boss 3D Model, Day/Dusk HDRI & Custom DIY Diorama Kit
   const modelSwap = new ModelSwapLoader();
@@ -552,9 +595,18 @@ async function bootstrap(): Promise<void> {
   let currentFps = 60;
   let inspectedExpression: ExpressionName | null = null;
 
-  const spawnPos = new THREE.Vector3(0, 0.25, 46);
+  const spawnPos = new THREE.Vector3(...activeWorldConfig.spawnPos);
   let secretCrateId: number | null = null;
   const dynamicHitCooldown = new Map<number, number>();
+  let worldEntities: WorldBuildResult = {
+    slimes: [],
+    tanks: [],
+    balloons: [],
+    clockworkGears: [],
+    secretCrateId: null,
+    tutorialCoinPos: new THREE.Vector3(0, 0.2, 22),
+    tutorialCratePos: new THREE.Vector3(0, 0.5, 11),
+  };
 
   const player = new ManmarubuuController(buuView, sound, {
     onHipDropImpact: (pos) => {
@@ -828,66 +880,175 @@ async function bootstrap(): Promise<void> {
     addTutorialAwareFeverCharge(8);
   }
 
-  // Attach single-dispatch onBreak hooks dynamically inside ToyBlocksManager spawn overrides
-  const origSpawnBlock = blocks.spawnAlphabetBlock.bind(blocks);
-  blocks.spawnAlphabetBlock = (ph, pos, idx, cb) => {
-    const rec = origSpawnBlock(ph, pos, idx, cb);
-    if (!rec.onBreak) {
-      rec.onBreak = (p, k) => onPropBroken(p, k, rec.id);
+  function attachBlockBreakHooks(mgr: ToyBlocksManager): void {
+    const origSpawnBlock = mgr.spawnAlphabetBlock.bind(mgr);
+    mgr.spawnAlphabetBlock = (ph, pos, idx, cb) => {
+      const rec = origSpawnBlock(ph, pos, idx, cb);
+      if (!rec.onBreak) {
+        rec.onBreak = (p, k) => onPropBroken(p, k, rec.id);
+      }
+      return rec;
+    };
+    const origSpawnCrate = mgr.spawnCrate.bind(mgr);
+    mgr.spawnCrate = (ph, pos, gl, cb) => {
+      const rec = origSpawnCrate(ph, pos, gl, cb);
+      if (!rec.onBreak) {
+        rec.onBreak = (p, k) => onPropBroken(p, k, rec.id);
+      }
+      return rec;
+    };
+  }
+
+  let worldBuiltOnce = false;
+  function buildWorldInPlace(
+    worldId: WorldId,
+    opts?: { restoreSavedRun?: boolean }
+  ): void {
+    const isRebuild = worldBuiltOnce;
+    worldBuiltOnce = true;
+
+    activeWorldId = worldId;
+    activeWorldConfig = getWorldConfig(worldId);
+    spawnPos.set(...activeWorldConfig.spawnPos);
+    clearTransientGameplayLocks();
+    dynamicHitCooldown.clear();
+
+    if (isRebuild) {
+      builder.dispose();
+      for (const s of worldEntities.slimes) engine.scene.remove(s.group);
+      for (const t of worldEntities.tanks) engine.scene.remove(t.group);
+      for (const b of worldEntities.balloons) engine.scene.remove(b.group);
+      engine.scene.remove(blocks.group);
+      engine.scene.remove(collectibles.group);
+      gimmicks.dispose();
+      engine.scene.remove(terrain.group);
+      engine.scene.remove(grassField.group);
+      worldProps.clearPlacedInstances();
+      physics.reset();
+
+      blocks = new ToyBlocksManager(engine.scene, pbr);
+      collectibles = new CollectiblesManager(engine.scene);
+      gimmicks = new GimmicksManager(engine.scene, pbr);
+      terrain = new CraftTerrainBuilder(engine.scene, pbr, useMobileLods);
+      grassField = new StylizedGrassField(engine.scene);
+      builder =
+        worldId === 'world1'
+          ? new World1PlayroomBuilder(engine.scene, pbr)
+          : new World1Builder(engine.scene, pbr);
     }
-    return rec;
-  };
-  const origSpawnCrate = blocks.spawnCrate.bind(blocks);
-  blocks.spawnCrate = (ph, pos, gl, cb) => {
-    const rec = origSpawnCrate(ph, pos, gl, cb);
-    if (!rec.onBreak) {
-      rec.onBreak = (p, k) => onPropBroken(p, k, rec.id);
+
+    attachBlockBreakHooks(blocks);
+    collectibles.setIndoorCeilingHeight(activeWorldConfig.indoor ? 21.5 : null);
+    skybox.setIndoorMode(activeWorldConfig.indoor);
+    engine.setIndoorMode(activeWorldConfig.indoor);
+    player.fallOutEnabled = activeWorldConfig.fallOutEnabled;
+    player.safeFloorBounds = activeWorldConfig.safeFloorBounds;
+
+    boss.configureArena(
+      new THREE.Vector3(...activeWorldConfig.bossArenaCenter),
+      new THREE.Vector3(...activeWorldConfig.bossSpawnPos),
+      activeWorldConfig.bossArenaRadius
+    );
+
+    worldEntities = builder.build(
+      physics,
+      blocks,
+      collectibles,
+      gimmicks,
+      terrain,
+      grassField,
+      worldProps,
+      (pos, variant, isTut) => {
+        const s = new JellySlime(
+          pos,
+          variant,
+          isTut,
+          modelSwap.createEnemyVisual('enemySlime')?.root
+        );
+        engine.scene.add(s.group);
+        return s;
+      },
+      (pos, isGuard) => {
+        const t = new WindupTank(
+          pos,
+          isGuard,
+          modelSwap.createEnemyVisual('enemyTank')?.root
+        );
+        engine.scene.add(t.group);
+        return t;
+      },
+      (pos) => {
+        const b = new PropellerBalloon(
+          pos,
+          modelSwap.createEnemyVisual('enemyBalloon')?.root
+        );
+        engine.scene.add(b.group);
+        return b;
+      },
+      () => {
+        tutorial.triggerContextualHint(
+          'cushion',
+          'ふかふかパッチワーククッション！乗るとポヨンと高く弾むよ！'
+        );
+      }
+    );
+    secretCrateId = worldEntities.secretCrateId;
+    gimmicks.upgradeVictoryChestWithModel(() => worldProps.createModelInstance('giftBox'));
+
+    // Reset per-run gameplay metrics cleanly for this world
+    score = 0;
+    coinsCollected = 0;
+    coinStreak = 0;
+    coinStreakTimer = 0;
+    elapsedPlaySec = 0;
+    feverBannerTimer = 0;
+    feverActivatedThisFrame = false;
+    fever.active = false;
+    fever.meter = 0;
+    fever.remainingSec = 0;
+    bossEngaged = false;
+    bossDefeated = false;
+    bossDamageTaken = 0;
+    gateLockedBannerCooldown = 0;
+    star3Unlocked = false;
+    tanksDefeatedCount = 0;
+    gameOverPenaltyCoins = 0;
+    gameOverPenaltyScore = 0;
+    wasInBossFight = false;
+    newlyEarnedStamps = [];
+    runStamps = [];
+    isNewHighScore = false;
+    clearRecorded = false;
+    resumedFromSaveNoticePending = false;
+    player.isDead = false;
+    player.damageTakenCount = 0;
+    player.invulnTimer = 0;
+    player.setMaxHp(3, true);
+    player.setCheckpoint(spawnPos, activeWorldConfig.spawnYaw);
+    player.teleport(physics, spawnPos, activeWorldConfig.spawnYaw);
+    cameraCtrl.resetBehind(spawnPos, activeWorldConfig.spawnYaw);
+    engine.setBossMood(0);
+    terrain.updateBossMood(0);
+
+    // Ensure world/prop materials created during build inherit current quality settings
+    applySettings(currentSettings, resolvedQuality);
+
+    if (opts?.restoreSavedRun !== false) {
+      restoreSavedRunForActiveWorld();
+    } else if (currentSaveData.tutorialCompleted || worldId !== 'world1') {
+      welcomeMoviePlayed = true;
+      tutorial.skipAll();
+      tutorialMarker.setTarget(null);
+    } else {
+      welcomeMoviePlayed = false;
+      tutorial.reset();
+      tutorialMarker.setTarget(null);
     }
-    return rec;
-  };
+  }
 
   updateBootLoader(84, 'ステージを くみたてちゅう…');
-
-  const worldEntities = builder.build(
-    physics,
-    blocks,
-    collectibles,
-    gimmicks,
-    terrain,
-    grassField,
-    worldProps,
-    (pos, variant, isTut) => {
-      const s = new JellySlime(pos, variant, isTut, modelSwap.createEnemyVisual('enemySlime')?.root);
-      engine.scene.add(s.group);
-      return s;
-    },
-    (pos, isGuard) => {
-      const t = new WindupTank(pos, isGuard, modelSwap.createEnemyVisual('enemyTank')?.root);
-      engine.scene.add(t.group);
-      return t;
-    },
-    (pos) => {
-      const b = new PropellerBalloon(pos, modelSwap.createEnemyVisual('enemyBalloon')?.root);
-      engine.scene.add(b.group);
-      return b;
-    },
-    () => {
-      tutorial.triggerContextualHint(
-        'cushion',
-        'ふかふかパッチワーククッション！乗るとポヨンと高く弾むよ！'
-      );
-    }
-  );
-  secretCrateId = worldEntities.secretCrateId;
-  gimmicks.upgradeVictoryChestWithModel(() => worldProps.createModelInstance('giftBox'));
-  // Ensure world/prop materials created during build inherit current quality simplification on initial low tier
-  applySettings(currentSettings, resolvedQuality);
+  buildWorldInPlace(activeWorldId, { restoreSavedRun: false });
   updateBootLoader(92, '仕上げを じゅんびちゅう…');
-
-  // Teleport player to starting meadow pad
-  player.setCheckpoint(spawnPos, Math.PI);
-  player.teleport(physics, spawnPos, Math.PI);
-  cameraCtrl.resetBehind(spawnPos, Math.PI);
 
   function getMainStarsCollectedCount(): number {
     let count = 0;
@@ -910,7 +1071,7 @@ async function bootstrap(): Promise<void> {
     const collectedStarIds = collectibles.stars.filter((s) => s.collected).map((s) => s.id);
     const hasAllMainStars = getMainStarsCollectedCount() >= 3;
     const effectiveHp = opts?.overrideHp ?? Math.max(1, player.hp);
-    currentSaveData = saveStore.saveRunState('world1', {
+    currentSaveData = saveStore.saveRunState(activeWorldId, {
       active: true,
       checkpoint: {
         x: cp.x,
@@ -930,8 +1091,8 @@ async function bootstrap(): Promise<void> {
       damageTakenCount: player.damageTakenCount,
       elapsedSec: elapsedPlaySec,
     });
-    const savedUpdatedAt = currentSaveData.worlds.world1?.run.updatedAt ?? Date.now();
-    writeRunBonusHpSidecar(player.maxHp, effectiveHp, savedUpdatedAt);
+    const savedUpdatedAt = currentSaveData.worlds[activeWorldId]?.run.updatedAt ?? Date.now();
+    writeRunBonusHpSidecar(activeWorldId, player.maxHp, effectiveHp, savedUpdatedAt);
     if (showToast) {
       autosaveToastTimer = 1.8;
     }
@@ -969,30 +1130,54 @@ async function bootstrap(): Promise<void> {
     if (clearRecorded) return;
     clearRecorded = true;
     const collectedIds = collectibles.stars.filter((s) => s.collected).map((s) => s.id);
-    const clearRes = saveStore.recordClear({
-      collectedStarIds: collectedIds,
-      score,
-      coins: coinsCollected,
-      bossDamageTaken,
-      rank: computeClearRank(),
-    });
+    const clearRes = saveStore.recordClear(
+      {
+        collectedStarIds: collectedIds,
+        score,
+        coins: coinsCollected,
+        bossDamageTaken,
+        rank: computeClearRank(),
+      },
+      activeWorldId
+    );
     newlyEarnedStamps = clearRes.newlyEarnedStamps;
     runStamps = clearRes.runStamps;
     isNewHighScore = clearRes.isNewHighScore;
     currentSaveData = clearRes.saveData;
-    clearRunBonusHpSidecar();
+    clearRunBonusHpSidecar(activeWorldId);
   }
 
-  function restartFreshWorld1Run(): void {
+  function restartFreshActiveWorldRun(): void {
     clearTransientGameplayLocks();
-    currentSaveData = saveStore.clearRun('world1');
-    clearRunBonusHpSidecar();
-    try {
-      window.sessionStorage.setItem('manmarubuu_autostart_play', '1');
-    } catch {
-      // Ignore sessionStorage errors
+    currentSaveData = saveStore.clearRun(activeWorldId);
+    clearRunBonusHpSidecar(activeWorldId);
+    buildWorldInPlace(activeWorldId, { restoreSavedRun: false });
+    sound.setBgmMode('explore');
+    phase = 'playing';
+  }
+
+  function selectAndStartWorld(worldId: WorldId, startPlaying = true): void {
+    sound.unlock();
+    sound.playUiClick();
+    if (
+      phase === 'playing' &&
+      activeWorldId !== worldId &&
+      (tutorial.step === 'done' || currentSaveData.tutorialCompleted)
+    ) {
+      autoSaveRun(false);
     }
-    window.location.reload();
+    currentSaveData = saveStore.setLastPlayedWorld(worldId);
+    const needRebuild =
+      worldId !== activeWorldId ||
+      clearRecorded ||
+      player.isVictory ||
+      Boolean(gimmicks.victoryChest?.opened);
+    if (needRebuild) {
+      buildWorldInPlace(worldId, { restoreSavedRun: true });
+    }
+    if (startPlaying) {
+      startPlayFromTitle();
+    }
   }
 
   // Soft radial drop shadow beneath Manmarubuu for crisp height & landing depth cues
@@ -1181,36 +1366,12 @@ async function bootstrap(): Promise<void> {
       if (t < 3.70) {
         const u = Math.min(1, (t - 1.45) / 2.25);
         const ease = u * u * (3 - 2 * u);
-        if (isPortrait) {
-          return {
-            pos: new THREE.Vector3(0, THREE.MathUtils.lerp(16.5, 16.8, ease), THREE.MathUtils.lerp(-2.5, -3.5, ease)),
-            lookAt: new THREE.Vector3(0, 8.6, -13.2),
-            fov: 62,
-          };
-        }
-        return {
-          pos: new THREE.Vector3(0, THREE.MathUtils.lerp(13.8, 14.5, ease), THREE.MathUtils.lerp(-4.2, -5.8, ease)),
-          lookAt: new THREE.Vector3(0, 8.6, -13.2),
-          fov: 54,
-        };
+        return activeWorldConfig.rainbowMovieCameras.gateAct(isPortrait, ease);
       }
 
       const u = Math.min(1, (t - 3.70) / (RAINBOW_MOVIE_DURATION - 3.70));
       const ease = u * u * (3 - 2 * u);
-      const startPos = isPortrait
-        ? new THREE.Vector3(16.5, 17.5, -18.0)
-        : new THREE.Vector3(14.5, 14.8, -18.5);
-      const endPos = isPortrait
-        ? new THREE.Vector3(19.5, 19.5, -27.5)
-        : new THREE.Vector3(17.5, 16.5, -28.5);
-      const pos = new THREE.Vector3().lerpVectors(startPos, endPos, ease);
-      const lookAt = new THREE.Vector3().lerpVectors(
-        new THREE.Vector3(0, 3.0, -25.5),
-        new THREE.Vector3(0, 4.6, -44.0),
-        ease
-      );
-      const fov = isPortrait ? THREE.MathUtils.lerp(58, 56, ease) : THREE.MathUtils.lerp(54, 52, ease);
-      return { pos, lookAt, fov };
+      return activeWorldConfig.rainbowMovieCameras.bridgeAct(isPortrait, ease);
     }, 6.8);
   }
 
@@ -1282,8 +1443,10 @@ async function bootstrap(): Promise<void> {
         gimmicks.openRainbowBridge(false);
         sound.playFeverStart();
         cameraCtrl.triggerShake(0.32, 0.35);
-        for (const bz of [-16, -22, -28, -33]) {
-          const bp = new THREE.Vector3(0, 2.5 + ((-bz - 14) / 20) * 2.2, bz);
+        for (const bz of activeWorldConfig.rainbowMovieCameras.sparkleZs) {
+          const br = activeWorldConfig.rainbowBridge;
+          const frac = THREE.MathUtils.clamp((bz - br.fromZ) / (br.toZ - br.fromZ || -1), 0, 1);
+          const bp = new THREE.Vector3(0, THREE.MathUtils.lerp(br.fromY, br.toY, frac) + 1.2, bz);
           vfx.spawnStarBurst(bp, 14, 6.5);
           vfx.spawnShockwaveRing(bp, 5.2, 0x7be8ff, 0.55);
         }
@@ -1316,15 +1479,16 @@ async function bootstrap(): Promise<void> {
     input.exitPointerLock();
     sound.setBgmMode('explore');
     phase = 'playing';
+    const wc = activeWorldConfig.welcomeCamera;
     cameraCtrl.startCinematic(WELCOME_DURATION + 0.5, (t01) => {
       const animT = Math.min(1, t01 / (WELCOME_DURATION / (WELCOME_DURATION + 0.5)));
       const ease = animT * animT * (3 - 2 * animT);
       const pPos = player.pos;
-      const startCam = new THREE.Vector3(18, 22, 64);
-      const startLook = new THREE.Vector3(0, 4.5, -10);
+      const startCam = new THREE.Vector3(...wc.startPos);
+      const startLook = new THREE.Vector3(...wc.startLook);
       const endCam = new THREE.Vector3(pPos.x, pPos.y + 3.4, pPos.z + 7.2);
       const endLook = new THREE.Vector3(pPos.x, pPos.y + 1.0, pPos.z - 2.0);
-      const arcX = Math.sin(ease * Math.PI) * -9.5;
+      const arcX = Math.sin(ease * Math.PI) * wc.arcX;
       const pos = new THREE.Vector3().lerpVectors(startCam, endCam, ease);
       pos.x += arcX * (1 - ease);
       const lookAt = new THREE.Vector3().lerpVectors(startLook, endLook, ease);
@@ -1349,32 +1513,13 @@ async function bootstrap(): Promise<void> {
     tutorialMarker.setTarget(null);
     cameraCtrl.startHoldCinematic((pPos) => {
       if (tutorial.tourPage === 0) {
-        return {
-          pos: new THREE.Vector3(pPos.x - 3.5, 15.2, Math.min(38, pPos.z - 6)),
-          lookAt: new THREE.Vector3(0, 9.0, 0),
-          fov: 52,
-        };
+        return activeWorldConfig.tourCameras.page0(pPos);
       }
       if (tutorial.tourPage === 1) {
-        // Portrait screens are narrow: pull back higher so the whole gear-topped 3-Star Gate fits
         const isPortrait = window.innerHeight > window.innerWidth;
-        return isPortrait
-          ? {
-              pos: new THREE.Vector3(0, 19.0, 4.0),
-              lookAt: new THREE.Vector3(0, 7.0, -17.0),
-              fov: 62,
-            }
-          : {
-              pos: new THREE.Vector3(0, 15.5, -1.5),
-              lookAt: new THREE.Vector3(0, 5.5, -23.0),
-              fov: 58,
-            };
+        return activeWorldConfig.tourCameras.page1(isPortrait);
       }
-      return {
-        pos: new THREE.Vector3(8, 17.0, -24),
-        lookAt: new THREE.Vector3(0, 4.8, -52),
-        fov: 52,
-      };
+      return activeWorldConfig.tourCameras.page2();
     }, 6.5);
   }
 
@@ -1440,7 +1585,7 @@ async function bootstrap(): Promise<void> {
     sound.unlock();
     sound.playUiClick();
     if (clearRecorded || player.isVictory || gimmicks.victoryChest?.opened) {
-      restartFreshWorld1Run();
+      restartFreshActiveWorldRun();
       return;
     }
     blurActiveElement();
@@ -1539,6 +1684,9 @@ async function bootstrap(): Promise<void> {
 
   const screens = new ScreensManager(hudRoot, {
     onStartGame: startPlayFromTitle,
+    onSelectWorld: (worldId) => {
+      selectAndStartWorld(worldId, true);
+    },
     onResetSaveAndNewGame: () => {
       sound.unlock();
       sound.playUiClick();
@@ -1575,7 +1723,7 @@ async function bootstrap(): Promise<void> {
       phase = 'playing';
     },
     onRestartGame: () => {
-      restartFreshWorld1Run();
+      restartFreshActiveWorldRun();
     },
     onRetryFromCheckpoint: () => {
       sound.unlock();
@@ -1668,12 +1816,6 @@ async function bootstrap(): Promise<void> {
     return out;
   }
 
-  const MAIN_STAR_NAV_META: Record<number, { shortLabel: string; label: string }> = {
-    1: { shortLabel: '★1', label: '★1 キャッスル' },
-    2: { shortLabel: '★2', label: '★2 赤バネタワー' },
-    3: { shortLabel: '★3', label: '★3 ボーリング' },
-  };
-
   function computeNavTargets(): NavTargetInfo[] {
     engine.camera.getWorldDirection(tmpCamFwd);
     let fx = tmpCamFwd.x;
@@ -1711,7 +1853,7 @@ async function bootstrap(): Promise<void> {
           bestDist = dist;
           bestId = s.id;
         }
-        const meta = MAIN_STAR_NAV_META[s.id] ?? {
+        const meta = activeWorldConfig.navMeta[s.id] ?? {
           shortLabel: `★${s.id}`,
           label: `★${s.id} ${s.areaName}`,
         };
@@ -1736,7 +1878,8 @@ async function bootstrap(): Promise<void> {
     }
 
     if (bossDefeated && !gimmicks.victoryChest?.opened) {
-      const chestPos = gimmicks.victoryChest?.pos ?? new THREE.Vector3(0, 4.0, -52.0);
+      const chestPos =
+        gimmicks.victoryChest?.pos ?? new THREE.Vector3(...activeWorldConfig.victoryChestPos);
       const { dist, relAngleRad } = toRelAngle(chestPos.x, chestPos.z);
       return [
         {
@@ -1753,9 +1896,10 @@ async function bootstrap(): Promise<void> {
     }
 
     if (gimmicks.rainbowBridgeOpen && !bossDefeated) {
-      const needGateDetour = player.pos.z > -14 && Math.abs(player.pos.x) > 8;
+      const gateZ = activeWorldConfig.starGatePos[2];
+      const needGateDetour = player.pos.z > gateZ - 0.8 && Math.abs(player.pos.x) > 8;
       if (needGateDetour) {
-        const { dist, relAngleRad } = toRelAngle(0, -13.2);
+        const { dist, relAngleRad } = toRelAngle(activeWorldConfig.starGatePos[0], gateZ);
         return [
           {
             id: 'gate',
@@ -1769,7 +1913,10 @@ async function bootstrap(): Promise<void> {
           },
         ];
       }
-      const { dist, relAngleRad } = toRelAngle(0, -52.0);
+      const { dist, relAngleRad } = toRelAngle(
+        activeWorldConfig.bossArenaCenter[0],
+        activeWorldConfig.bossArenaCenter[2]
+      );
       return [
         {
           id: 'boss',
@@ -2032,7 +2179,7 @@ async function bootstrap(): Promise<void> {
         },
         (star) => {
           sound.playStar();
-          currentSaveData = saveStore.recordStar(star.id);
+          currentSaveData = saveStore.recordStar(star.id, activeWorldId);
           const pts = 500 * fever.getScoreMultiplier();
           score += pts;
           player.happyTimer = 2.6;
@@ -2043,9 +2190,9 @@ async function bootstrap(): Promise<void> {
               (s) => s.kind === 'main' && s.collected
             ).length;
             vfx.spawnShockwaveRing(star.pos, 7.0, 0xffe042, 0.55);
-            callouts.spawnWorld(
-              star.pos,
-              engine.camera,
+            callouts.spawnScreen(
+              window.innerWidth * 0.5,
+              window.innerHeight * 0.30,
               `★ STAR ${star.id} GET!`,
               'star',
               star.label,
@@ -2114,9 +2261,9 @@ async function bootstrap(): Promise<void> {
               vfx.spawnConfetti(player.pos, 42);
               vfx.spawnStarBurst(player.pos, 32, 10.5);
               input.rumble(280, 0.7, 0.85);
-              callouts.spawnWorld(
-                star.pos,
-                engine.camera,
+              callouts.spawnScreen(
+                window.innerWidth * 0.5,
+                window.innerHeight * 0.30,
                 '💎 3/3 COMPLETE!',
                 'fever',
                 star.label,
@@ -2136,9 +2283,9 @@ async function bootstrap(): Promise<void> {
                 },
               };
             } else {
-              callouts.spawnWorld(
-                star.pos,
-                engine.camera,
+              callouts.spawnScreen(
+                window.innerWidth * 0.5,
+                window.innerHeight * 0.30,
                 `💎 SECRET STAR ${secretCount}/3`,
                 'star',
                 star.label,
@@ -2280,8 +2427,8 @@ async function bootstrap(): Promise<void> {
           });
         }
 
-        // West Bowling Plaza contextual hint & Star 3 unlock check
-        if (!star3Unlocked && player.pos.x < -12 && player.pos.z < -20) {
+        // Bowling Plaza contextual hint & Star 3 unlock check
+        if (!star3Unlocked && activeWorldConfig.isInBowlingHintZone(player.pos)) {
           tutorial.triggerContextualHint(
             'bowling-area',
             'ボーリングピンとタンクを合計5体以上倒すと、奥のスターの封印がとけるよ！'
@@ -2315,10 +2462,7 @@ async function bootstrap(): Promise<void> {
           !rainbowMovieActive &&
           !rewardCard &&
           gateLockedBannerCooldown <= 0 &&
-          Math.abs(player.pos.x) < 4.5 &&
-          player.pos.z < -11.2 &&
-          player.pos.z > -15.0 &&
-          player.pos.y < 5.5
+          activeWorldConfig.isAtLockedGate(player.pos)
         ) {
           gateLockedBannerCooldown = 4.0;
           const remaining = Math.max(1, 3 - mainStarsCollected);
@@ -2336,9 +2480,9 @@ async function bootstrap(): Promise<void> {
         const inBossArena =
           bossArenaUnlocked &&
           !bossDefeated &&
-          distToBossArenaCenter < 17.3 &&
-          player.pos.z < -36.6 &&
-          player.pos.y >= 3.2 &&
+          distToBossArenaCenter < activeWorldConfig.bossArenaRadius - 0.2 &&
+          player.pos.z < activeWorldConfig.bossArenaEntryMaxZ &&
+          player.pos.y >= activeWorldConfig.bossArenaMinY &&
           player.pos.y <= 12.0;
         if (inBossArena && !bossEngaged) {
           bossEngaged = true;
@@ -2395,7 +2539,7 @@ async function bootstrap(): Promise<void> {
               bossDefeated = true;
               sound.setBgmMode('explore');
               vfx.spawnConfetti(arenaCenter, 44);
-              gimmicks.spawnVictoryChest(new THREE.Vector3(0, 4.0, -52));
+              gimmicks.spawnVictoryChest(new THREE.Vector3(...activeWorldConfig.victoryChestPos));
               autoSaveRun(true);
               tutorial.showTempBanner('🎁 巨大プレゼント宝箱が出現！開けてゴールしよう！', 4.8);
             },
@@ -2439,6 +2583,7 @@ async function bootstrap(): Promise<void> {
           playerGrounded: player.grounded,
           feverActivatedThisFrame,
           feverActive: fever.active,
+          step5ZThreshold: activeWorldConfig.tutorialStep5ZThreshold,
         },
         {
           onAchieved: (completed) => {
@@ -2496,10 +2641,16 @@ async function bootstrap(): Promise<void> {
         player.pos.x - boss.arenaCenter.x,
         player.pos.z - boss.arenaCenter.z
       );
-      const onRainbowBridgeCorridor = Math.abs(player.pos.x) <= 7.5 && player.pos.z <= -14.0;
-      const inArenaZone = distArenaXZ <= 20.5 && player.pos.y >= 2.5;
+      const bridgeStartZ = activeWorldConfig.rainbowBridge.fromZ;
+      const onRainbowBridgeCorridor =
+        Math.abs(player.pos.x) <= 7.5 && player.pos.z <= bridgeStartZ;
+      const inArenaZone =
+        distArenaXZ <= activeWorldConfig.bossArenaRadius + 3.0 &&
+        player.pos.y >= activeWorldConfig.bossArenaMinY - 0.5;
       if (onRainbowBridgeCorridor || inArenaZone) {
-        targetBossMood = THREE.MathUtils.clamp((-22.0 - player.pos.z) / 14.0, 0, 1);
+        const moodStartZ = activeWorldConfig.rainbowBridge.toZ + 4.0;
+        const rawMood = THREE.MathUtils.clamp((moodStartZ - player.pos.z) / 14.0, 0, 1);
+        targetBossMood = rawMood * activeWorldConfig.maxBossMood;
       }
     }
     const nextMood = THREE.MathUtils.lerp(
@@ -2563,6 +2714,7 @@ async function bootstrap(): Promise<void> {
         bossPos: bossEngaged && !bossDefeated ? boss.pos : null,
         moveYaw: horizSpeed > 0.5 ? Math.atan2(player.vel.x, player.vel.z) : player.facingYaw,
         time: totalTime,
+        titleCamera: activeWorldConfig.titleCamera,
       }
     );
 
@@ -2595,6 +2747,8 @@ async function bootstrap(): Promise<void> {
 
     const snap: HudSnapshot = {
       phase,
+      activeWorldId,
+      activeWorldName: activeWorldConfig.name,
       hp: player.hp,
       maxHp: player.maxHp,
       stars: mainStars,
@@ -2680,7 +2834,7 @@ async function bootstrap(): Promise<void> {
       faceWipe3dActive,
       autosaveToastVisible: autosaveToastTimer > 0,
       hasSaveProgress: saveStore.hasSaveProgress(),
-      hasResumableRun: saveStore.hasResumableRun('world1'),
+      hasResumableRun: saveStore.hasResumableRun(activeWorldId),
       saveData: currentSaveData,
       newlyEarnedStamps,
       runStamps,
@@ -2693,13 +2847,21 @@ async function bootstrap(): Promise<void> {
     screens.update(snap);
 
     blocks.syncDynamicInstances(resolvedQuality, engine.camera.position);
-    worldProps.updateDistanceCulling(resolvedQuality, engine.camera.position);
+    worldProps.updateDistanceCulling(
+      resolvedQuality,
+      engine.camera.position,
+      activeWorldConfig.bossArenaCenter[2],
+      activeWorldConfig.bowlingCenter[0],
+      activeWorldConfig.bowlingCenter[1]
+    );
     builder.updateDistanceCulling(resolvedQuality, engine.camera.position);
     grassField.updateDistanceCulling(resolvedQuality, engine.camera.position);
     if (resolvedQuality === 'low') {
       const camPos = engine.camera.position;
       if (!bossDefeated && boss.state === 'dormant') {
-        boss.group.visible = rainbowMovieActive || Math.hypot(camPos.x, camPos.z + 54) <= 72;
+        boss.group.visible =
+          rainbowMovieActive ||
+          Math.hypot(camPos.x - boss.pos.x, camPos.z - boss.pos.z) <= 72;
       }
       for (const tk of worldEntities.tanks) {
         if (tk.alive && tk.isBowlingGuard) {
@@ -2724,7 +2886,7 @@ async function bootstrap(): Promise<void> {
       faceWipe3dActive &&
       !welcomeMovieActive &&
       !rainbowMovieActive &&
-      (phase === 'playing' || phase === 'cutscene' || phase === 'victory')
+      (phase === 'playing' || phase === 'cutscene')
     ) {
       faceWipe.render(
         engine.renderer,
@@ -2996,6 +3158,12 @@ async function bootstrap(): Promise<void> {
     openWorldSelectForTest: () => {
       phase = 'world_select';
     },
+    getActiveWorldId: () => activeWorldId,
+    selectWorldForTest: (worldId: WorldId, startPlaying = true) => {
+      if (!isValidWorldId(worldId)) return false;
+      selectAndStartWorld(worldId, startPlaying);
+      return true;
+    },
     triggerTouchModeForTest: (mode: GameSettings['showTouchControlsOverride']) => {
       settingsStore.update({ showTouchControlsOverride: mode });
       if (mode === 'on') input.setTouchDeviceActive();
@@ -3022,8 +3190,9 @@ async function bootstrap(): Promise<void> {
     },
     openChestForTest: () => {
       bossDefeated = true;
-      gimmicks.spawnVictoryChest(new THREE.Vector3(0, 4.0, -52));
-      player.teleport(physics, new THREE.Vector3(0, 4.2, -52), 0.15);
+      const chestPos = new THREE.Vector3(...activeWorldConfig.victoryChestPos);
+      gimmicks.spawnVictoryChest(chestPos);
+      player.teleport(physics, chestPos.clone().add(new THREE.Vector3(0, 0.2, 0)), 0.15);
     },
     getPwaState: () => screens.getPwaState(),
     getBootState: () => ({
@@ -3035,17 +3204,21 @@ async function bootstrap(): Promise<void> {
     getBgmState: () => sound.getBgmState(),
   };
 
-  function restoreSavedProgressOnBoot(): void {
+  function restoreSavedRunForActiveWorld(): void {
     clearTransientGameplayLocks();
-    const run = currentSaveData.worlds.world1?.run;
-    if (currentSaveData.tutorialCompleted || run?.active) {
+    const run = currentSaveData.worlds[activeWorldId]?.run;
+    if (currentSaveData.tutorialCompleted || run?.active || activeWorldId !== 'world1') {
       welcomeMoviePlayed = true;
       tutorial.skipAll();
+      tutorialMarker.setTarget(null);
+    } else {
+      welcomeMoviePlayed = false;
+      tutorial.reset();
       tutorialMarker.setTarget(null);
     }
 
     if (!run || !run.active) {
-      clearRunBonusHpSidecar();
+      clearRunBonusHpSidecar(activeWorldId);
     }
 
     if (run && run.active) {
@@ -3082,7 +3255,7 @@ async function bootstrap(): Promise<void> {
       if (hasAllSecretStarsInRun) {
         player.setMaxHp(4, false);
       }
-      const sidecar = readRunBonusHpSidecar();
+      const sidecar = readRunBonusHpSidecar(activeWorldId);
       if (sidecar && (sidecar.updatedAt === run.updatedAt || !run.updatedAt)) {
         player.setMaxHp(sidecar.maxHp, false);
         player.hp = Math.max(1, Math.min(player.maxHp, Math.round(sidecar.hp)));
@@ -3104,17 +3277,24 @@ async function bootstrap(): Promise<void> {
         boss.group.visible = false;
         gimmicks.victoryChest.opened = false;
         gimmicks.victoryChest.openProgress = 0;
-        gimmicks.spawnVictoryChest(new THREE.Vector3(0, 4.0, -52));
-        const chestDist = Math.hypot(player.pos.x, player.pos.z + 52);
-        if (chestDist < 5.0 || player.pos.z < -33) {
-          const safePos = new THREE.Vector3(0, 1.2, -11.0);
-          player.setCheckpoint(safePos, Math.PI);
-          player.teleport(physics, safePos, Math.PI);
-          cameraCtrl.resetBehind(safePos, Math.PI);
+        const chestPos = new THREE.Vector3(...activeWorldConfig.victoryChestPos);
+        gimmicks.spawnVictoryChest(chestPos);
+        const chestDist = Math.hypot(player.pos.x - chestPos.x, player.pos.z - chestPos.z);
+        const bossCutZ = activeWorldId === 'world1' ? -25.0 : -33.0;
+        if (chestDist < 5.0 || player.pos.z < bossCutZ) {
+          const safe = activeWorldConfig.safeGateCheckpoint;
+          const safePos = new THREE.Vector3(safe.x, safe.y, safe.z);
+          player.setCheckpoint(safePos, safe.yaw);
+          player.teleport(physics, safePos, safe.yaw);
+          cameraCtrl.resetBehind(safePos, safe.yaw);
         }
       }
       resumedFromSaveNoticePending = true;
     }
+  }
+
+  function restoreSavedProgressOnBoot(): void {
+    restoreSavedRunForActiveWorld();
 
     try {
       const autoNew = window.sessionStorage.getItem('manmarubuu_autostart_new') === '1';

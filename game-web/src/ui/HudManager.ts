@@ -319,8 +319,8 @@ export class HudManager {
 
       <div class="welcome-movie-overlay hidden" data-role="welcome-overlay">
         <div class="welcome-title-card">
-          <div class="welcome-kicker">✨ STORYBOOK ISLAND ✨</div>
-          <div class="welcome-main-title">ようこそ、まんまる島へ！</div>
+          <div class="welcome-kicker" data-role="welcome-kicker">✨ SUNLIT PLAYROOM ✨</div>
+          <div class="welcome-main-title" data-role="welcome-main-title">ようこそ、キッズルームへ！</div>
           <div class="welcome-sub">まんまるぶうといっしょに、大冒険がはじまるよ！</div>
         </div>
         <button class="welcome-skip-btn" data-role="welcome-skip-btn" type="button">スキップ ⏭</button>
@@ -581,7 +581,8 @@ export class HudManager {
   }
 
   update(snap: HudSnapshot, tutorial: TutorialManager): void {
-    const showInGame = snap.phase !== 'title' && snap.phase !== 'world_select';
+    const showInGame =
+      snap.phase !== 'title' && snap.phase !== 'world_select' && snap.phase !== 'victory';
     if (showInGame !== this.lastShowInGame) {
       this.lastShowInGame = showInGame;
       this.hudWrap.style.display = showInGame ? 'block' : 'none';
@@ -779,6 +780,17 @@ export class HudManager {
     const showWelcome = snap.welcomeMovieActive && (snap.phase === 'playing' || snap.phase === 'cutscene');
     if (showWelcome !== this.lastWelcomeVisible) {
       this.lastWelcomeVisible = showWelcome;
+      if (showWelcome) {
+        const kickerEl = this.welcomeOverlayEl.querySelector('[data-role="welcome-kicker"]');
+        const titleEl = this.welcomeOverlayEl.querySelector('[data-role="welcome-main-title"]');
+        if (snap.activeWorldId === 'world1') {
+          if (kickerEl) kickerEl.textContent = '✨ SUNLIT PLAYROOM ✨';
+          if (titleEl) titleEl.textContent = 'ようこそ、キッズルームへ！';
+        } else {
+          if (kickerEl) kickerEl.textContent = '✨ SKY TOYBOX MEADOW ✨';
+          if (titleEl) titleEl.textContent = 'ようこそ、天空のおもちゃばこへ！';
+        }
+      }
       this.welcomeOverlayEl.classList.toggle('hidden', !showWelcome);
       this.hudWrap.classList.toggle('welcome-active', showWelcome);
       this.onLayoutChange?.();

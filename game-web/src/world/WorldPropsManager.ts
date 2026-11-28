@@ -78,7 +78,16 @@ export type PropKey =
   | 'bossGearMedium'
   | 'bossGearSmall'
   | 'bossBalusterSection'
-  | 'bossLanternPost';
+  | 'bossLanternPost'
+  // World 1 Sunlit Playroom Kit (Blender 5.2)
+  | 'playroomBed'
+  | 'playroomToyChest'
+  | 'playroomBookshelf'
+  | 'playroomPictureBook'
+  | 'playroomToyTrain'
+  | 'playroomWallShelf'
+  | 'playroomWindowFrame'
+  | 'playroomCastleRoof';
 
 const PROP_PATHS: Record<PropKey, string> = {
   castleArchGate: '/models/diorama/castle_arch_gate.glb',
@@ -121,6 +130,15 @@ const PROP_PATHS: Record<PropKey, string> = {
   bossGearSmall: '/models/diorama/boss_gear_small.glb',
   bossBalusterSection: '/models/diorama/boss_baluster_section.glb',
   bossLanternPost: '/models/diorama/boss_lantern_post.glb',
+
+  playroomBed: '/models/playroom/playroom_bed.glb',
+  playroomToyChest: '/models/playroom/playroom_toy_chest.glb',
+  playroomBookshelf: '/models/playroom/playroom_bookshelf.glb',
+  playroomPictureBook: '/models/playroom/playroom_picture_book.glb',
+  playroomToyTrain: '/models/playroom/playroom_toy_train.glb',
+  playroomWallShelf: '/models/playroom/playroom_wall_shelf.glb',
+  playroomWindowFrame: '/models/playroom/playroom_window_frame.glb',
+  playroomCastleRoof: '/models/playroom/playroom_castle_roof.glb',
 };
 
 const PRESERVED_NODES_BY_PROP: Partial<
@@ -347,6 +365,45 @@ export class WorldPropsManager {
     inner.position.y = tpl.baseOffsetY;
     g.add(inner);
     return g;
+  }
+
+  /**
+   * Clones a grounded model instance while cloning & patching specific named sub-materials
+   * without mutating the shared template materials.
+   */
+  createCustomizedModelInstance(
+    key: PropKey,
+    patchByMatName?: Record<string, (mat: THREE.MeshStandardMaterial) => void>
+  ): THREE.Group | null {
+    const g = this.createModelInstance(key);
+    if (!g || !patchByMatName) return g;
+    const clonedCache = new Map<THREE.Material, THREE.Material>();
+    const patchOne = (mat: THREE.Material): THREE.Material => {
+      const fn = patchByMatName[mat.name];
+      if (!fn || !(mat instanceof THREE.MeshStandardMaterial)) return mat;
+      let cloned = clonedCache.get(mat);
+      if (!cloned) {
+        cloned = mat.clone();
+        fn(cloned as THREE.MeshStandardMaterial);
+        cloned.needsUpdate = true;
+        clonedCache.set(mat, cloned);
+      }
+      return cloned;
+    };
+    g.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return;
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map(patchOne);
+      } else if (obj.material) {
+        obj.material = patchOne(obj.material);
+      }
+    });
+    return g;
+  }
+
+  getTemplateSize(key: PropKey): THREE.Vector3 | null {
+    const tpl = this.templates.get(key);
+    return tpl ? tpl.size.clone() : null;
   }
 
   /** Preserves Blender design origin verbatim (essential for Boss Deck pit & centered physics). */
@@ -578,6 +635,25 @@ export class WorldPropsManager {
     }
   }
 
+  clearPlacedInstances(): void {
+    while (this.group.children.length > 0) {
+      const child = this.group.children[0];
+      this.group.remove(child);
+      if (child instanceof THREE.InstancedMesh) {
+        child.dispose();
+      }
+    }
+    this.batches.clear();
+    this.rawBatches.clear();
+    for (const g of this.garlandCordGeos) g.dispose();
+    this.garlandCordGeos = [];
+    this.garlandFlags = [];
+    this.bossZoneObjects = [];
+    this.bowlingZoneObjects = [];
+    this.instancedBatchesCount = 0;
+    this.totalInstancesCount = 0;
+  }
+
   flushBatches(): void {
     this.flushBatchCollection(this.batches, true);
     this.flushBatchCollection(this.rawBatches, false);
@@ -597,18 +673,24 @@ export class WorldPropsManager {
     }
   }
 
-  updateDistanceCulling(resolved: ResolvedQuality, camPos: THREE.Vector3): void {
+  updateDistanceCulling(
+    resolved: ResolvedQuality,
+    camPos: THREE.Vector3,
+    bossCenterZ = -52,
+    bowlingCenterX = -21,
+    bowlingCenterZ = -30.5
+  ): void {
     const shouldCull = resolved === 'low' || (this.isMobileDevice && resolved !== 'high');
     if (!shouldCull) {
       for (const o of this.bossZoneObjects) o.visible = true;
       for (const o of this.bowlingZoneObjects) o.visible = true;
       return;
     }
-    const bossDist = Math.hypot(camPos.x - 0, camPos.z + 52);
+    const bossDist = Math.hypot(camPos.x - 0, camPos.z - bossCenterZ);
     const showBoss = bossDist <= 85;
     for (const o of this.bossZoneObjects) o.visible = showBoss;
 
-    const bowlDist = Math.hypot(camPos.x + 21, camPos.z + 30.5);
+    const bowlDist = Math.hypot(camPos.x - bowlingCenterX, camPos.z - bowlingCenterZ);
     const showBowl = bowlDist <= 78;
     for (const o of this.bowlingZoneObjects) o.visible = showBowl;
   }

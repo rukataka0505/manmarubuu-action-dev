@@ -25,6 +25,7 @@ export class PhysicsWorld {
   private staticColliders = new Set<number>();
   private staticBodyByCollider = new Map<number, RAPIER.RigidBody>();
   private slideColliders = new Set<number>();
+  private slideDirByCollider = new Map<number, { x: number; z: number }>();
   private cushionColliders = new Map<number, { topY: number; onBounce?: () => void }>();
   private nextId = 1;
   private maxDynamicCount = 160;
@@ -35,9 +36,16 @@ export class PhysicsWorld {
     return pw;
   }
 
-  async init(): Promise<void> {
-    await withTimeout(RAPIER.init(), 20000, 'Rapier physics WASM');
-    this.rapier = RAPIER;
+  private initWorldState(): void {
+    this.dynamicRecords.clear();
+    this.colliderToRecord.clear();
+    this.staticColliders.clear();
+    this.staticBodyByCollider.clear();
+    this.slideColliders.clear();
+    this.slideDirByCollider.clear();
+    this.cushionColliders.clear();
+    this.nextId = 1;
+
     this.world = new RAPIER.World({ x: 0, y: -24.0, z: 0 });
 
     // Character controller for Mario-style crisp platforming
@@ -54,6 +62,21 @@ export class PhysicsWorld {
     this.playerBody = this.world.createRigidBody(bodyDesc);
     const colDesc = RAPIER.ColliderDesc.capsule(0.22, 0.28).setTranslation(0, 0.50, 0);
     this.playerCollider = this.world.createCollider(colDesc, this.playerBody);
+  }
+
+  async init(): Promise<void> {
+    await withTimeout(RAPIER.init(), 20000, 'Rapier physics WASM');
+    this.rapier = RAPIER;
+    this.initWorldState();
+  }
+
+  reset(): void {
+    try {
+      this.world?.free();
+    } catch {
+      // Ignore double-free
+    }
+    this.initWorldState();
   }
 
   setPlayerPosition(x: number, y: number, z: number): void {
@@ -77,6 +100,7 @@ export class PhysicsWorld {
       rotEuler?: THREE.Euler;
       friction?: number;
       isSlide?: boolean;
+      slideDir?: { x: number; z: number };
       cushionTopY?: number;
       onCushion?: () => void;
       ignoreRays?: boolean;
@@ -94,7 +118,10 @@ export class PhysicsWorld {
     if (!opts?.ignoreRays) {
       this.staticColliders.add(col.handle);
     }
-    if (opts?.isSlide) this.slideColliders.add(col.handle);
+    if (opts?.isSlide) {
+      this.slideColliders.add(col.handle);
+      if (opts.slideDir) this.slideDirByCollider.set(col.handle, opts.slideDir);
+    }
     if (opts?.cushionTopY !== undefined) {
       this.cushionColliders.set(col.handle, { topY: opts.cushionTopY, onBounce: opts.onCushion });
     }
@@ -105,6 +132,7 @@ export class PhysicsWorld {
     const handle = col.handle;
     this.staticColliders.delete(handle);
     this.slideColliders.delete(handle);
+    this.slideDirByCollider.delete(handle);
     this.cushionColliders.delete(handle);
     const rb = this.staticBodyByCollider.get(handle);
     if (rb) {
@@ -136,7 +164,7 @@ export class PhysicsWorld {
     geometry: THREE.BufferGeometry,
     pos: THREE.Vector3,
     rot?: THREE.Euler,
-    opts?: { isSlide?: boolean; friction?: number }
+    opts?: { isSlide?: boolean; slideDir?: { x: number; z: number }; friction?: number }
   ): RAPIER.Collider | null {
     const posAttr = geometry.getAttribute('position');
     if (!posAttr) return null;
@@ -165,7 +193,10 @@ export class PhysicsWorld {
     const colDesc = RAPIER.ColliderDesc.trimesh(vertices, indices).setFriction(opts?.friction ?? 0.25);
     const col = this.world.createCollider(colDesc, rb);
     this.staticColliders.add(col.handle);
-    if (opts?.isSlide) this.slideColliders.add(col.handle);
+    if (opts?.isSlide) {
+      this.slideColliders.add(col.handle);
+      if (opts.slideDir) this.slideDirByCollider.set(col.handle, opts.slideDir);
+    }
     return col;
   }
 
@@ -231,6 +262,7 @@ export class PhysicsWorld {
     pos: THREE.Vector3;
     grounded: boolean;
     onSlide: boolean;
+    slideDir: { x: number; z: number } | null;
     hitWall: boolean;
     hitCushion: { topY: number; onBounce?: () => void } | null;
     touchedDynamics: DynamicBodyRecord[];
@@ -254,6 +286,7 @@ export class PhysicsWorld {
 
     let grounded = this.charController.computedGrounded();
     let onSlide = false;
+    let slideDir: { x: number; z: number } | null = null;
     let hitWall = false;
     let hitCushion: { topY: number; onBounce?: () => void } | null = null;
     const touchedDynamics: DynamicBodyRecord[] = [];
@@ -273,6 +306,8 @@ export class PhysicsWorld {
         if (this.slideColliders.has(h)) {
           onSlide = true;
           grounded = true;
+          const sd = this.slideDirByCollider.get(h);
+          if (sd) slideDir = sd;
         }
         const cush = this.cushionColliders.get(h);
         if (cush && c.normal1 && c.normal1.y > 0.45) {
@@ -290,6 +325,7 @@ export class PhysicsWorld {
       pos: new THREE.Vector3(next.x, next.y, next.z),
       grounded,
       onSlide,
+      slideDir,
       hitWall,
       hitCushion,
       touchedDynamics,

@@ -2,6 +2,7 @@ import type {
   SaveData,
   StampDef,
   StampId,
+  WorldId,
   WorldProgress,
   WorldRunCheckpoint,
   WorldRunState,
@@ -9,11 +10,19 @@ import type {
 
 const STORAGE_KEY = 'manmarubuu_save_v2';
 const LEGACY_STORAGE_KEY = 'manmarubuu_save_v1';
-const SAFE_GATE_CHECKPOINT: WorldRunCheckpoint = {
-  x: 0,
-  y: 1.2,
-  z: -11.0,
-  yaw: Math.PI,
+const SAFE_GATE_CHECKPOINTS: Record<string, WorldRunCheckpoint> = {
+  world1: {
+    x: 0,
+    y: 0.4,
+    z: -14.8,
+    yaw: Math.PI,
+  },
+  world2: {
+    x: 0,
+    y: 1.2,
+    z: -11.0,
+    yaw: Math.PI,
+  },
 };
 
 export const WORLD1_STAMPS: StampDef[] = [
@@ -49,8 +58,16 @@ export const WORLD1_STAMPS: StampDef[] = [
   },
 ];
 
+export function getWorldStamps(worldId: string): StampDef[] {
+  const worldNum = worldId === 'world2' ? '2' : '1';
+  return WORLD1_STAMPS.map((st) =>
+    st.id === 'clear_w1' ? { ...st, title: `ワールド${worldNum}クリア` } : st
+  );
+}
+
 export interface WorldCatalogItem {
   id: number;
+  worldKey: string;
   name: string;
   subtitle: string;
   description: string;
@@ -64,9 +81,22 @@ export interface WorldCatalogItem {
 export const WORLD_CATALOG: WorldCatalogItem[] = [
   {
     id: 1,
-    name: 'World 1：おもちゃばこの草原',
-    subtitle: 'TOYBOX MEADOW',
-    description: '積み木のお城、すべり台ボーリング、時計じかけの王が待つ最初の冒険！',
+    worldKey: 'world1',
+    name: 'World 1：陽だまりの巨大キッズルーム',
+    subtitle: 'SUNLIT PLAYROOM',
+    description: '落ちない広々フロア！積み木キャッスル、クッション山＆巨大ベッド、おもちゃ汽車とツインすべり台の大冒険！',
+    playable: true,
+    comingSoon: false,
+    mainStars: 3,
+    secretStars: 3,
+    themeColor: '#f4b44e',
+  },
+  {
+    id: 2,
+    worldKey: 'world2',
+    name: 'World 2：天空のおもちゃばこ',
+    subtitle: 'SKY TOYBOX MEADOW',
+    description: '空に浮かぶフェルトの草原！積み木のお城、赤バネタワー、巨大すべり台ボーリングに挑もう！',
     playable: true,
     comingSoon: false,
     mainStars: 3,
@@ -74,18 +104,8 @@ export const WORLD_CATALOG: WorldCatalogItem[] = [
     themeColor: '#6ad88b',
   },
   {
-    id: 2,
-    name: 'World 2：スイーツ工場のふわふわ雲',
-    subtitle: 'SUGAR CLOUD BAKERY',
-    description: 'マシュマロトランポリンとクッキー歯車の工場（今後のアップデートで追加予定）',
-    playable: false,
-    comingSoon: true,
-    mainStars: 3,
-    secretStars: 3,
-    themeColor: '#ff9ec4',
-  },
-  {
     id: 3,
+    worldKey: 'world3',
     name: 'World 3：星空のからくり遊園地',
     subtitle: 'STARLIGHT CLOCKWORK PARK',
     description: '光る観覧車と宇宙コースターの夜空ステージ（今後のアップデートで追加予定）',
@@ -132,9 +152,10 @@ function createEmptySave(): SaveData {
     version: 2,
     tutorialCompleted: false,
     lastPlayedWorldId: 'world1',
-    unlockedWorlds: [1],
+    unlockedWorlds: [1, 2],
     worlds: {
       world1: createEmptyWorldProgress(),
+      world2: createEmptyWorldProgress(),
     },
   };
 }
@@ -182,7 +203,10 @@ function normalizeCheckpoint(raw: unknown): WorldRunCheckpoint | null {
   return null;
 }
 
-function normalizeRunState(raw: Partial<WorldRunState> | null | undefined): WorldRunState {
+function normalizeRunState(
+  raw: Partial<WorldRunState> | null | undefined,
+  worldId = 'world1'
+): WorldRunState {
   const base = createEmptyRunState();
   if (!raw || typeof raw !== 'object') return base;
   const collectedStarIds = normalizeStarIds(raw.collectedStarIds);
@@ -190,12 +214,15 @@ function normalizeRunState(raw: Partial<WorldRunState> | null | undefined): Worl
   const bossDefeated = hasAllMainStars && Boolean(raw.bossDefeated);
   const rainbowBridgeOpen = hasAllMainStars && (Boolean(raw.rainbowBridgeOpen) || bossDefeated);
   let checkpoint = normalizeCheckpoint(raw.checkpoint);
+  const bossCutZ = worldId === 'world1' ? -25 : -33;
+  const bossCenterZ = worldId === 'world1' ? -43.5 : -52;
+  const safeGateCp = SAFE_GATE_CHECKPOINTS[worldId] ?? SAFE_GATE_CHECKPOINTS.world1;
   if (
     bossDefeated &&
     checkpoint &&
-    (checkpoint.z < -33 || Math.hypot(checkpoint.x, checkpoint.z + 52) < 6.5)
+    (checkpoint.z < bossCutZ || Math.hypot(checkpoint.x, checkpoint.z - bossCenterZ) < 6.5)
   ) {
-    checkpoint = { ...SAFE_GATE_CHECKPOINT };
+    checkpoint = { ...safeGateCp };
   }
   return {
     active: Boolean(raw.active),
@@ -230,7 +257,10 @@ function normalizeRunState(raw: Partial<WorldRunState> | null | undefined): Worl
   };
 }
 
-function normalizeWorldProgress(raw: Partial<WorldProgress> | null | undefined): WorldProgress {
+function normalizeWorldProgress(
+  raw: Partial<WorldProgress> | null | undefined,
+  worldId = 'world1'
+): WorldProgress {
   const base = createEmptyWorldProgress();
   if (!raw || typeof raw !== 'object') return base;
 
@@ -246,7 +276,7 @@ function normalizeWorldProgress(raw: Partial<WorldProgress> | null | undefined):
     raw.bestRank === 'S' || raw.bestRank === 'A' || raw.bestRank === 'B' ? raw.bestRank : null;
 
   const cleared = Boolean(raw.cleared);
-  let run = normalizeRunState(raw.run);
+  let run = normalizeRunState(raw.run, worldId);
   if (cleared && run.active && run.bossDefeated) {
     run = createEmptyRunState();
   }
@@ -267,19 +297,23 @@ function normalizeSave(raw: Partial<SaveData> | null | undefined): SaveData {
 
   const unlocked = Array.isArray(raw.unlockedWorlds)
     ? Array.from(new Set(raw.unlockedWorlds.filter((n): n is number => typeof n === 'number')))
-    : [1];
+    : [1, 2];
   if (!unlocked.includes(1)) unlocked.unshift(1);
+  if (!unlocked.includes(2)) unlocked.push(2);
 
   const worlds: Record<string, WorldProgress> = {};
   if (raw.worlds && typeof raw.worlds === 'object') {
     for (const [k, v] of Object.entries(raw.worlds)) {
       if (typeof k === 'string' && k.trim().length > 0) {
-        worlds[k] = normalizeWorldProgress(v);
+        worlds[k] = normalizeWorldProgress(v, k);
       }
     }
   }
   if (!worlds.world1) {
     worlds.world1 = createEmptyWorldProgress();
+  }
+  if (!worlds.world2) {
+    worlds.world2 = createEmptyWorldProgress();
   }
 
   const lastPlayedWorldId =
@@ -315,18 +349,22 @@ function migrateFromV1(rawV1: LegacySaveV1 | null | undefined): SaveData {
 
   const unlocked = Array.isArray(rawV1.unlockedWorlds)
     ? Array.from(new Set(rawV1.unlockedWorlds.filter((n): n is number => typeof n === 'number')))
-    : [1];
+    : [1, 2];
   if (!unlocked.includes(1)) unlocked.unshift(1);
+  if (!unlocked.includes(2)) unlocked.push(2);
 
   const legacyW1 = rawV1.world1;
-  const w1 = normalizeWorldProgress({
-    cleared: Boolean(legacyW1?.cleared),
-    collectedStarIds: legacyW1?.collectedStarIds,
-    stamps: legacyW1?.stamps,
-    highScore: legacyW1?.highScore,
-    bestRank: legacyW1?.bestRank,
-    run: createEmptyRunState(),
-  });
+  const w1 = normalizeWorldProgress(
+    {
+      cleared: Boolean(legacyW1?.cleared),
+      collectedStarIds: legacyW1?.collectedStarIds,
+      stamps: legacyW1?.stamps,
+      highScore: legacyW1?.highScore,
+      bestRank: legacyW1?.bestRank,
+      run: createEmptyRunState(),
+    },
+    'world1'
+  );
 
   const hasAnyProgress =
     w1.cleared || w1.collectedStarIds.length > 0 || w1.highScore > 0 || w1.stamps.length > 0;
@@ -349,6 +387,7 @@ function migrateFromV1(rawV1: LegacySaveV1 | null | undefined): SaveData {
     unlockedWorlds: unlocked,
     worlds: {
       world1: w1,
+      world2: createEmptyWorldProgress(),
     },
   };
 }
@@ -482,15 +521,27 @@ export class SaveStore {
     return this.cloneData();
   }
 
+  setLastPlayedWorld(worldId: WorldId): SaveData {
+    this.ensureWorld(worldId);
+    if (this.data.lastPlayedWorldId !== worldId) {
+      this.data.lastPlayedWorldId = worldId;
+      this.save();
+    }
+    return this.cloneData();
+  }
+
   saveRunState(worldId: string, run: Partial<WorldRunState>): SaveData {
     const w = this.ensureWorld(worldId);
     this.data.lastPlayedWorldId = worldId;
-    const merged = normalizeRunState({
-      ...w.run,
-      ...run,
-      active: true,
-      updatedAt: Date.now(),
-    });
+    const merged = normalizeRunState(
+      {
+        ...w.run,
+        ...run,
+        active: true,
+        updatedAt: Date.now(),
+      },
+      worldId
+    );
     w.run = merged;
 
     let changedCumulative = false;

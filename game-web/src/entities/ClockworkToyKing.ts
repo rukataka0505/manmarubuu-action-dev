@@ -124,7 +124,8 @@ export class ClockworkToyKing {
   public readonly group = new THREE.Group();
   public readonly pos = new THREE.Vector3(0, 4.0, -54);
   public readonly arenaCenter = new THREE.Vector3(0, 4.0, -52);
-  public readonly arenaRadius = 17.5;
+  public arenaRadius = 17.5;
+  private spawnPos = new THREE.Vector3(0, 4.0, -54);
 
   public state: BossState = 'dormant';
   public hp = 3;
@@ -636,6 +637,17 @@ export class ClockworkToyKing {
     this.stateTimer = 2.6;
   }
 
+  public configureArena(
+    center: THREE.Vector3,
+    spawnPos: THREE.Vector3,
+    radius = 17.5
+  ): void {
+    this.arenaCenter.copy(center);
+    this.spawnPos.copy(spawnPos);
+    this.arenaRadius = radius;
+    this.resetFight();
+  }
+
   public resetFight(): void {
     this.hp = this.maxHp;
     this.phase = 1;
@@ -653,7 +665,8 @@ export class ClockworkToyKing {
     this.springVisibleForStun = false;
     hideBossPopupSpring();
 
-    this.pos.set(0, 4.0, -54);
+    this.pos.copy(this.spawnPos);
+    this.slamPos.set(this.spawnPos.x, this.arenaCenter.y, this.spawnPos.z + 2.2);
     this.yaw = 0;
     this.walkCycle = 0;
     this.group.position.copy(this.pos);

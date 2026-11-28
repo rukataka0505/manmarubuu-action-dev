@@ -61,8 +61,8 @@ export class ManmarubuuView {
 
   // Plush shader uniforms
   public readonly plushUniforms: PlushUniforms = {
-    uRimColor: { value: new THREE.Color(0xfff1c9) },
-    uRimStrength: { value: 0.42 },
+    uRimColor: { value: new THREE.Color(0xfff1dc) },
+    uRimStrength: { value: 0.48 },
     uFeverStrength: { value: 0.0 },
     uTime: { value: 0.0 },
   };

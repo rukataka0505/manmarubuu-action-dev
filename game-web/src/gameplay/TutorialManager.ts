@@ -18,6 +18,7 @@ export interface TutorialEvaluateState {
   playerGrounded: boolean;
   feverActivatedThisFrame: boolean;
   feverActive: boolean;
+  step5ZThreshold?: number;
 }
 
 export interface TutorialEvaluateCallbacks {
@@ -598,9 +599,10 @@ export class TutorialManager {
         this.completeStep(4, callbacks.onAchieved);
       }
     } else if (this.step === 5) {
+      const zLimit = state.step5ZThreshold ?? 24.5;
       if (
         state.tutorialCratesRemaining === 0 ||
-        (state.playerMadeHipDrop && state.playerZ < 24.5)
+        (state.playerMadeHipDrop && state.playerZ < zLimit)
       ) {
         this.completeStep(5, callbacks.onAchieved);
       }
